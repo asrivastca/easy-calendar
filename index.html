@@ -551,31 +551,55 @@ function openType(prefill=''){
 
 /* ---------- Speak ---------- */
 let rec = null;
-function stopListening(){ try{ rec && rec.abort(); }catch(e){} rec = null; }
+function stopListening(){ try{ stopListening._clear && stopListening._clear(); }catch(e){} const r = rec; rec = null; try{ r && r.abort(); }catch(e){} }
 function openSpeak(){
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if(!SR){ return openTypeWithNotice('Voice is not available in this browser. Please type it instead — or open the app in Chrome, Edge or Safari to use voice.'); }
   openSheet(`${head('Say your appointment')}
-    <div class="mic"><div class="dot" aria-hidden="true">🎤</div><div class="state" id="micState">Listening… go ahead</div>
+    <div class="mic"><div class="dot" aria-hidden="true">🎤</div><div class="state" id="micState">Listening… go ahead</div><div style="color:var(--muted);font-size:1rem;text-align:center">I'll wait until you've been quiet for 4 seconds, or tap <b>I'm done talking</b>.</div>
       <div class="hint" style="width:100%">Say something like: <b>“I have an appointment with my family doctor at 6:30 a.m. on Tuesday, November 10th.”</b></div>
       <div class="heard" id="heard" aria-live="polite"></div></div>
     <div class="row"><button class="primary" id="doneTalk">I'm done talking</button><button class="secondary" id="typeInstead">Type instead</button></div>`);
-  let finalText = '', interim = '', handled = false;
-  const heard = sheet.querySelector('#heard');
-  const finish = () => { if(handled) return; handled = true; const t = (finalText + ' ' + interim).trim(); stopListening();
+  /* Keep listening until the person has been quiet for SILENCE_MS.
+     Browsers stop recognition after ~1s of silence on their own, so we
+     restart it quietly and decide ourselves when the person is finished. */
+  const SILENCE_MS = 4000;       // pause allowed between words / phrases
+  const START_WAIT_MS = 10000;   // time allowed before they start speaking
+  let finalText = '', interim = '', handled = false, silenceTimer = null;
+  const heard = sheet.querySelector('#heard'), stateEl = sheet.querySelector('#micState');
+  const armTimer = ms => { clearTimeout(silenceTimer); silenceTimer = setTimeout(finish, ms); };
+  const finish = () => { if(handled) return; handled = true; clearTimeout(silenceTimer); const t = (finalText + ' ' + interim).trim(); stopListening();
     if(!t) return openTypeWithNotice("I didn't hear anything. You can try again, or type it here."); showConfirm(parseAppointment(t)); };
+  stopListening._clear = () => clearTimeout(silenceTimer);
   sheet.querySelector('#doneTalk').onclick = finish;
-  sheet.querySelector('#typeInstead').onclick = () => { handled = true; stopListening(); openType((finalText+' '+interim).trim()); };
-  try{
-    rec = new SR(); rec.lang = 'en-CA'; rec.interimResults = true; rec.continuous = false; rec.maxAlternatives = 1;
-    rec.onresult = e => { interim = ''; for(let i=e.resultIndex;i<e.results.length;i++){ const r = e.results[i]; if(r.isFinal) finalText += r[0].transcript + ' '; else interim += r[0].transcript; } heard.textContent = (finalText + interim).trim(); };
-    rec.onerror = e => { if(handled) return; handled = true; rec = null;
+  sheet.querySelector('#typeInstead').onclick = () => { handled = true; clearTimeout(silenceTimer); stopListening(); openType((finalText+' '+interim).trim()); };
+  const startRec = () => {
+    const me = rec = new SR(); rec.lang = 'en-CA'; rec.interimResults = true; rec.continuous = true; rec.maxAlternatives = 1;
+    rec.onresult = e => {
+      interim = '';
+      for(let i=e.resultIndex;i<e.results.length;i++){ const r = e.results[i]; if(r.isFinal) finalText += r[0].transcript + ' '; else interim += r[0].transcript; }
+      heard.textContent = (finalText + interim).trim();
+      stateEl.textContent = 'Listening… take your time';
+      armTimer(SILENCE_MS);
+    };
+    rec.onerror = e => {
+      if(handled || rec !== me) return;
+      if(e.error==='no-speech' || e.error==='aborted') return;   // onend will restart; our timer decides when to stop
+      handled = true; clearTimeout(silenceTimer); rec = null;
       const msg = (e.error==='not-allowed'||e.error==='service-not-allowed') ? 'The microphone is turned off for this page. Please type it instead.' :
-                  e.error==='no-speech' ? "I didn't hear anything. Please type it, or close and tap the microphone again." : 'Voice stopped working. Please type it instead.';
-      openTypeWithNotice(msg, (finalText+' '+interim).trim()); };
-    rec.onend = () => { if(!handled && (finalText||interim)) finish(); };
+                  'Voice stopped working. Please type it instead.';
+      openTypeWithNotice(msg, (finalText+' '+interim).trim());
+    };
+    rec.onend = () => {
+      if(handled || rec !== me) return;   // closed or replaced: don't restart
+      // keep what was heard so far, then quietly start listening again
+      if(interim){ finalText += interim + ' '; interim = ''; }
+      try{ startRec(); }catch(err){ finish(); }
+    };
     rec.start();
-  }catch(err){ handled = true; openTypeWithNotice('Voice could not start here. Please type it instead.'); }
+  };
+  try{ startRec(); armTimer(START_WAIT_MS); }
+  catch(err){ handled = true; openTypeWithNotice('Voice could not start here. Please type it instead.'); }
 }
 function openTypeWithNotice(msg, prefill=''){ openType(prefill); sheet.querySelector('.sheet-head').insertAdjacentHTML('afterend', `<div class="notice" role="alert">${esc(msg)}</div>`); }
 
