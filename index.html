@@ -147,6 +147,7 @@
   .vbar #vheard{font-weight:400;flex:1;min-width:0}
   .vbar button{min-height:52px;border-radius:10px;border:2px solid var(--ink);background:#fff;font-weight:700;padding:0 14px;margin-left:auto}
   label.f{display:block;font-weight:700;margin:14px 0 6px;font-size:1.1rem}
+  select.f{width:100%;min-height:64px;border:3px solid var(--ink);border-radius:12px;padding:0 14px;font-size:1.25rem;background:#fff}
   input.f{width:100%;min-height:64px;border:3px solid var(--ink);border-radius:12px;padding:0 14px;font-size:1.25rem;background:#fff}
 
   .toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--ink);color:#fff;border-radius:16px;
@@ -211,7 +212,7 @@
   </div>
 
   <main id="main"></main>
-  <p style="margin-top:28px;text-align:center;color:var(--muted);font-size:.85rem">Easy Calendar · version 1.5</p>
+  <p style="margin-top:28px;text-align:center;color:var(--muted);font-size:.85rem">Easy Calendar · version 1.6</p>
 </div>
 
 <div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
@@ -239,6 +240,42 @@ function fmtDate(s){ const d = fromYmd(s); return `${WEEKDAYS[d.getDay()]}, ${MO
 function fmtDateYear(s){ const d = fromYmd(s); const y = d.getFullYear() !== new Date().getFullYear() ? `, ${d.getFullYear()}` : ''; return fmtDate(s)+y; }
 function fmtTime(t){ if(!t) return 'Any time'; let [h,m] = t.split(':').map(Number); const ap = h>=12?'PM':'AM'; h = h%12||12; return `${h}:${pad(m)} ${ap}`; }
 function fmtTimeSpoken(t){ if(!t) return 'no set time'; let [h,m]=t.split(':').map(Number); const ap=h>=12?'P M':'A M'; h=h%12||12; return m? `${h} ${pad(m)} ${ap}` : `${h} ${ap}`; }
+/* ---------- Duration ---------- */
+const DUR_CHOICES = [15,30,45,60,90,120,180];
+function fmtDur(m){ if(!m) return ''; const h = Math.floor(m/60), r = m%60;
+  if(m===90) return '1½ hours'; if(m===150) return '2½ hours';
+  if(!h) return `${r} minutes`; return `${h} hour${h>1?'s':''}${r?` ${r} minutes`:''}`; }
+function fmtDurSpoken(m){ if(!m) return ''; if(m===30) return 'half an hour'; if(m===90) return 'an hour and a half'; if(m===60) return 'one hour';
+  return fmtDur(m).replace('½',' and a half'); }
+function endTime(t, m){ const [h,mi] = t.split(':').map(Number); const x = h*60+mi+m; return `${pad(Math.floor(x/60)%24)}:${pad(x%60)}`; }
+function fmtRange(t, m){ if(!t) return 'Any time'; if(!m) return fmtTime(t);
+  const a = fmtTime(t), b = fmtTime(endTime(t,m));
+  return a.slice(-2) === b.slice(-2) ? `${a.slice(0,-3)} – ${b}` : `${a} – ${b}`; }
+const DUR_WORDS = {one:1,two:2,three:3,four:4,five:5,six:6,seven:7,eight:8,nine:9,ten:10,fifteen:15,twenty:20,'twenty five':25,thirty:30,'forty five':45,forty:40,sixty:60,ninety:90};
+function durWordsToDigits(s){
+  s = s.replace(/(\w)-(\w)/g, '$1 $2');
+  for(const [w,n] of Object.entries(DUR_WORDS).sort((a,b)=>b[0].length-a[0].length))
+    s = s.replace(new RegExp(`\\b${w}\\b(?=\\s+(?:and a half\\s+)?(?:hours?|hrs?|minutes?|mins?)\\b)`,'g'), n);
+  return s;
+}
+// Returns {minutes, match} or null.  "for an hour", "45 minutes", "an hour and a half", "2 hours 15 minutes"
+function findDuration(text){
+  let s = durWordsToDigits(' ' + text.toLowerCase().replace(/,/g,' ').replace(/\s+/g,' ') + ' ');
+  const lead = '(?:(?:for|about|around|roughly|approximately|it(?:\'ll| will)? (?:take|last)s?|takes|lasts|lasting)\\s+)*';
+  const pats = [
+    [new RegExp(`\\b${lead}(?:an?|one|1)\\s+hours?\\s+and\\s+a\\s+half\\b`), () => 90],
+    [new RegExp(`\\b${lead}(\\d+)\\s+and\\s+a\\s+half\\s+hours?\\b`), m => +m[1]*60+30],
+    [new RegExp(`\\b${lead}(?:a\\s+)?half\\s+(?:an\\s+)?hour\\b`), () => 30],
+    [new RegExp(`\\b${lead}(?:a\\s+)?quarter\\s+(?:of\\s+)?(?:an\\s+)?hour\\b`), () => 15],
+    [new RegExp(`\\b${lead}(\\d+(?:\\.\\d+)?)\\s*(?:hours?|hrs?|h)\\s+(?:and\\s+)?(\\d+)\\s*(?:minutes?|mins?)\\b`), m => Math.round(+m[1]*60) + +m[2]],
+    [new RegExp(`\\b${lead}(\\d+(?:\\.\\d+)?)\\s*(?:hours?|hrs?)\\b`), m => Math.round(+m[1]*60)],
+    [new RegExp(`\\b${lead}(?:an?|one)\\s+hour\\b`), () => 60],
+    [new RegExp(`\\b${lead}(\\d+)\\s*(?:minutes?|mins?)\\b`), m => +m[1]],
+  ];
+  for(const [re, f] of pats){ const m = s.match(re); if(m){ const v = f(m); if(v > 0 && v <= 12*60) return {minutes:v, match:m[0].trim()}; } }
+  return null;
+}
+
 function relDay(s){ const n = daysBetween(new Date(), fromYmd(s)); if(n===0) return 'Today'; if(n===1) return 'Tomorrow'; if(n===-1) return 'Yesterday'; if(n>1 && n<7) return `In ${n} days`; if(n>=7) return `In ${n} days`; return ''; }
 
 /* ---------- Categories (icon + word, never colour alone) ---------- */
@@ -280,6 +317,7 @@ function normalize(text){
     return `${h}:${pad(mm)}`; });
   s = s.replace(/\b([ap])\.?\s?m\b\.?/g, (m,a)=>`${a}m`);
   s = s.replace(/(\d{1,2}:\d{2}|\d{1,2})\s*(am|pm)\b/g, '$1 $2');
+  s = durWordsToDigits(s);
   s = s.replace(/\s+/g,' ');
   return s;
 }
@@ -289,7 +327,7 @@ function parseAppointment(text, now = new Date()){
   let s = normalize(text);
   let rest = s;
   const cut = (m) => { rest = rest.replace(m, ' '); };
-  const res = {raw:text, title:'', date:null, time:null, timeGuessed:false, conflict:null, dateGuessed:false};
+  const res = {raw:text, title:'', date:null, time:null, duration:null, timeGuessed:false, conflict:null, dateGuessed:false};
 
   /* ----- DATE ----- */
   let saidWeekday = null, m;
@@ -332,6 +370,23 @@ function parseAppointment(text, now = new Date()){
     res.date = ymd(addDays(today, diff));
   }
 
+  /* ----- DURATION ----- */
+  const dm = findDuration(rest);
+  if(dm){ res.duration = dm.minutes; rest = rest.replace(dm.match, ' '); }
+  // "from 2 to 3 pm" / "from 2:30 until 4"
+  let endT = null;
+  if((m = rest.match(/\bfrom\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s+(?:to|until|till)\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/))){
+    const ap2 = m[6] || m[3] || null, ap1 = m[3] || ap2;
+    const h24 = (h, ap) => { h = +h; if(ap === 'pm' && h < 12) h += 12; if(ap === 'am' && h === 12) h = 0; return h; };
+    let sh = h24(m[1], ap1), eh = h24(m[4], ap2);
+    if(!ap1 && !ap2 && +m[1] >= 1 && +m[1] <= 6){ sh += 12; eh = eh < sh ? eh + 12 : eh; res.timeGuessed = true; }
+    if(ap2 === 'pm' && !m[3] && sh + 12 <= eh) sh += 12;
+    res.time = `${pad(sh)}:${pad(+(m[2]||0))}`; endT = eh*60 + +(m[5]||0); cut(m[0]);
+  }
+  else if((m = rest.match(/\b(?:until|till|til|to)\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b|\b(?:until|till|til)\s+(\d{1,2})(?::(\d{2}))?\b/))){
+    res._end = m; cut(m[0]);
+  }
+
   /* ----- TIME ----- */
   let daypart = null;
   if(/\b(in the morning|this morning)\b/.test(rest)) daypart='am';
@@ -357,6 +412,13 @@ function parseAppointment(text, now = new Date()){
     if(res._h>12) h = res._h; // 24-hour clock
     setT(h, res._m); delete res._h; delete res._m;
   }
+
+  if(res.time && endT !== null){ const [h,mi] = res.time.split(':').map(Number); let d = endT - (h*60+mi); if(d <= 0) d += 12*60; if(d > 0 && d <= 12*60) res.duration = d; }
+  if(res.time && res._end){ const m2 = res._end, [h,mi] = res.time.split(':').map(Number);
+    let eh = +(m2[1]||m2[4]), em = +(m2[2]||m2[5]||0), ap = m2[3];
+    if(ap === 'pm' && eh < 12) eh += 12; if(ap === 'am' && eh === 12) eh = 0;
+    let d = eh*60+em - (h*60+mi); if(!ap && d <= 0) d += 12*60; if(d > 0 && d <= 12*60) res.duration = d; }
+  delete res._end;
 
   /* ----- TITLE ----- */
   let t = rest.replace(/\b(please|okay|ok|hey|um|uh|so)\b/g,' ')
@@ -393,12 +455,12 @@ function save(){ try{ localStorage.setItem(KEY, JSON.stringify(state)); }catch(e
 function seedIfNew(){
   if(state.seeded) return;
   const t = new Date();
-  const mk = (title, d, time, text) => ({id: uid(), title, date: ymd(addDays(t,d)), time, catKey: categorize(text||title), sample:true});
+  const mk = (title, d, time, text, duration) => ({id: uid(), title, date: ymd(addDays(t,d)), time, duration, catKey: categorize(text||title), sample:true});
   state.appts = [
-    mk('Pick up prescription', 0, '16:00', 'pharmacy'),
-    mk('Blood test', 3, '08:00'),
-    mk('Lunch with the family', 6, '12:30', 'lunch family'),
-    mk('Dentist cleaning', 12, '10:15', 'dentist'),
+    mk('Pick up prescription', 0, '16:00', 'pharmacy', 15),
+    mk('Blood test', 3, '08:00', null, 30),
+    mk('Lunch with the family', 6, '12:30', 'lunch family', 90),
+    mk('Dentist cleaning', 12, '10:15', 'dentist', 60),
   ].map(a => ({...a, cat: a.catKey})).map(({catKey, ...a}) => a);
   state.seeded = true; save();
 }
@@ -431,7 +493,7 @@ function renderNext(){
   el.innerHTML = `<div class="next"><span class="ico" aria-hidden="true">${up.cat.icon}</span><div>
     <div class="lbl">Next appointment</div>
     <div class="what">${esc(up.title)}</div>
-    <div class="when"><b>${rel ? rel + ' · ' : ''}</b>${fmtDate(up.date)} at ${fmtTime(up.time)}</div></div></div>`;
+    <div class="when"><b>${rel ? rel + ' · ' : ''}</b>${fmtDate(up.date)} · ${fmtRange(up.time, up.duration)}</div></div></div>`;
 }
 
 function renderSampleNote(){
@@ -472,7 +534,7 @@ function renderMonth(){
 function apptRow(a){
   return `<div class="appt"><span class="ico" aria-hidden="true">${a.cat.icon}</span>
     <span class="t">${fmtTime(a.time)}</span>
-    <div class="grow"><div class="w">${esc(a.title)}</div><div class="k">${a.cat.label}${a.place?' · '+esc(a.place):''}</div></div>
+    <div class="grow"><div class="w">${esc(a.title)}</div><div class="k">${a.duration&&a.time?`<b>${fmtRange(a.time,a.duration)}</b> · ${fmtDur(a.duration)} · `:''}${a.cat.label}${a.place?' · '+esc(a.place):''}</div></div>
     <div class="ops"><button data-edit="${a.id}">Change</button><button class="del" data-del="${a.id}">Delete</button></div></div>`;
 }
 function wireRowOps(root){
@@ -535,7 +597,7 @@ function openDay(date){
   wireRowOps(sheet);
   sheet.querySelector('#addHere').onclick = () => openForm({date});
   const rd = sheet.querySelector('#readDay');
-  if(rd) rd.onclick = () => speak(`${fmtDate(date)}. ` + list.map(a=>`At ${fmtTimeSpoken(a.time)}, ${a.title}.`).join(' '));
+  if(rd) rd.onclick = () => speak(`${fmtDate(date)}. ` + list.map(a=>`At ${fmtTimeSpoken(a.time)}, ${a.title}${a.duration?`, for ${fmtDurSpoken(a.duration)}`:''}.`).join(' '));
 }
 
 /* ---------- Type ---------- */
@@ -681,10 +743,10 @@ const QUICK_RE = /^(yes|yeah|yep|yup|no|nope|correct|ok|okay|save it|cancel|morn
 const NUM_WORDS = {one:1,two:2,three:3,four:4,five:5,six:6,seven:7,eight:8,nine:9,ten:10,eleven:11,twelve:12};
 const numWordsToDigits = t => t.replace(/\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b/gi, w => NUM_WORDS[w.toLowerCase()]);
 const dayNum = s => fromYmd(s).getDate();
-const atTime = t => t ? `at ${fmtTimeSpoken(t)}` : 'with no set time';
+const atTime = (t, m) => t ? `at ${fmtTimeSpoken(t)}${m ? `, for ${fmtDurSpoken(m)}` : ''}` : 'with no set time';
 
 function showConfirm(p, draft, voice){
-  const d = draft || {title:p.title, date:p.date, time:p.time, cat:p.cat, place:'', id:null,
+  const d = draft || {title:p.title, date:p.date, time:p.time, duration:p.duration||null, cat:p.cat, place:'', id:null,
                       _timeGuessed: !!(p.time && p.timeGuessed), _voice: !!voice, _tries:{}};
   d._tries = d._tries || {};
   const next = nd => showConfirm(p, {...d, ...nd});
@@ -736,24 +798,36 @@ function showConfirm(p, draft, voice){
       handle: t => { if(/\b(morning|a\.? ?m|before noon)\b/i.test(t)) return {time:am, _timeOk:true};
         if(/\b(afternoon|evening|night|p\.? ?m|after noon)\b/i.test(t)) return {time:pm, _timeOk:true}; return null; }});
   }
+  if(!qs.length && d.time && !d.duration && !d._durOk){
+    qs.push({key:'duration',
+      html:`<p>How long will it take?</p><div class="choices">${[15,30,60,90,120].map(m=>`<button data-dur="${m}">${fmtDur(m)}</button>`).join('')}<button data-dur="0">Not sure</button></div>`,
+      say:'About how long will it take? For example, half an hour, or one hour. If you are not sure, just say: not sure.',
+      handle: t => {
+        if(/\b(not sure|don't know|do not know|no idea|skip|doesn't matter|no)\b/i.test(t) && !findDuration(t)) return {_durOk:true};
+        const f = findDuration(t) || findDuration('for ' + t + (/\d\s*$/.test(t) ? ' minutes' : ''));
+        return f ? {duration:f.minutes, _durOk:true} : null; }});
+  }
   if(d._changing){
-    qs.push({key:'change', html:`<p>What would you like to change?</p><div class="choices"><button data-change="date">The day</button><button data-change="time">The time</button><button data-change="title">What it is</button></div>`,
-      say:'What would you like to change? You can say a new day, a new time, or a new name.',
+    qs.push({key:'change', html:`<p>What would you like to change?</p><div class="choices"><button data-change="date">The day</button><button data-change="time">The time</button><button data-change="title">What it is</button><button data-change="duration">How long</button></div>`,
+      say:'What would you like to change? You can say a new day, a new time, how long it takes, or a new name.',
       handle: t => {
         if(CANCEL_RE.test(t)) return {_cancel:true};
         if(/^\s*(the\s+)?(day|date)\s*$/i.test(t)) return {date:null, _changing:false};
         if(/^\s*(the\s+)?time\s*$/i.test(t)) return {time:null, _anyTime:false, _timeOk:false, _changing:false};
         if(/^\s*(the\s+)?(name|title|what it is)\s*$/i.test(t)) return {title:'Appointment', _titleOk:false, _changing:false};
+        if(/^\s*(the\s+)?(length|duration|how long)\s*$/i.test(t)) return {duration:null, _durOk:false, _changing:false};
         const r = parseAppointment(t), ch = {_changing:false}; let any = false;
+        if(r.duration){ ch.duration = r.duration; ch._durOk = true; any = true; }
         if(r.date){ ch.date = r.date; any = true; }
         if(r.time){ ch.time = r.time; ch._timeGuessed = r.timeGuessed; ch._timeOk = !r.timeGuessed; any = true; }
+        if(!any && /^\s*\d+\s*$/.test(t)) return null;
         if(!any && r.title && r.title !== 'Appointment' && !NO_RE.test(t)){ ch.title = r.title; ch.cat = categorize(t); any = true; }
         return any ? ch : null; }});
   }
   const ready = !qs.length;
-  if(ready) qs.push({key:'final', html:'', say:`${d.title}. ${fmtDate(d.date)}, ${atTime(d.time)}. Shall I save it? Please say yes, or no.`,
+  if(ready) qs.push({key:'final', html:'', say:`${d.title}. ${fmtDate(d.date)}, ${atTime(d.time, d.duration)}. Shall I save it? Please say yes, or no.`,
     handle: t => { if(CANCEL_RE.test(t)) return {_cancel:true}; if(YES_RE.test(t) && !NO_RE.test(t)) return {_save:true};
-      if(NO_RE.test(t)){ const r = parseAppointment(t), ch = {}; if(r.date) ch.date = r.date; if(r.time){ ch.time = r.time; ch._timeGuessed = r.timeGuessed; ch._timeOk = !r.timeGuessed; }
+      if(NO_RE.test(t)){ const r = parseAppointment(t), ch = {}; if(r.date) ch.date = r.date; if(r.duration){ ch.duration = r.duration; ch._durOk = true; } if(r.time){ ch.time = r.time; ch._timeGuessed = r.timeGuessed; ch._timeOk = !r.timeGuessed; }
         return Object.keys(ch).length ? ch : {_changing:true}; }
       return null; }});
   const q = qs[0];
@@ -763,7 +837,8 @@ function showConfirm(p, draft, voice){
     <div class="confirm"><div class="top"><span class="ico" aria-hidden="true">${d.cat.icon}</span>
       <div><div class="what">${esc(d.title)}</div><div class="cat">${d.cat.label}</div></div></div>
       <dl><dt>Day</dt><dd>${d.date ? fmtDateYear(d.date) + (relDay(d.date)?` <span style="font-weight:400">(${relDay(d.date)})</span>`:'') : '—'}</dd>
-          <dt>Time</dt><dd>${d.time ? fmtTime(d.time) : (d._anyTime ? 'Any time' : '—')}</dd></dl></div>
+          <dt>Time</dt><dd>${d.time ? fmtRange(d.time, d.duration) : (d._anyTime ? 'Any time' : '—')}</dd>
+          ${d.time ? `<dt>How long</dt><dd>${d.duration ? fmtDur(d.duration) : (d._durOk ? 'Not sure' : '—')}</dd>` : ''}</dl></div>
     ${q.html ? `<div class="question">${q.html}</div>` : ''}
     ${d._voice ? `<div class="vbar" id="vbar"><span id="vstate">🔊 Asking…</span><span id="vheard"></span><button id="vstop">Stop voice</button></div>` : ''}
     <div class="row">
@@ -785,7 +860,9 @@ function showConfirm(p, draft, voice){
   sheet.querySelectorAll('[data-ampm]').forEach(b => b.onclick = () => next({time:b.dataset.ampm, _timeOk:true}));
   sheet.querySelectorAll('[data-change]').forEach(b => b.onclick = () => {
     const k = b.dataset.change;
-    next(k === 'date' ? {date:null, _changing:false} : k === 'time' ? {time:null, _anyTime:false, _timeOk:false, _changing:false} : {title:'Appointment', _titleOk:false, _changing:false}); });
+    next(k === 'date' ? {date:null, _changing:false} : k === 'time' ? {time:null, _anyTime:false, _timeOk:false, _changing:false}
+       : k === 'duration' ? {duration:null, _durOk:false, _changing:false} : {title:'Appointment', _titleOk:false, _changing:false}); });
+  sheet.querySelectorAll('[data-dur]').forEach(b => b.onclick = () => next(+b.dataset.dur ? {duration:+b.dataset.dur, _durOk:true} : {_durOk:true}));
   const skip = sheet.querySelector('[data-title-skip]'); if(skip) skip.onclick = () => next({_titleOk:true});
   const typ = sheet.querySelector('[data-title-type]'); if(typ) typ.onclick = () => openForm(d, p);
   const sv = sheet.querySelector('#saveIt'); if(sv) sv.onclick = () => commit(d);
@@ -832,6 +909,8 @@ function openForm(a={}, p=null){
       <input class="f" id="fDate" type="date" value="${a.date||ymd(new Date())}">
       <label class="f" for="fTime">What time?</label>
       <input class="f" id="fTime" type="time" value="${a.time||''}">
+      <label class="f" for="fDur">How long?</label>
+      <select class="f" id="fDur"><option value="">Not sure</option>${[...new Set([...DUR_CHOICES, ...(a.duration?[a.duration]:[])])].sort((x,y)=>x-y).map(m=>`<option value="${m}" ${a.duration===m?'selected':''}>${fmtDur(m)}</option>`).join('')}</select>
       <label class="f" for="fPlace">Where? <span style="font-weight:400">(optional)</span></label>
       <input class="f" id="fPlace" value="${esc(a.place||'')}" placeholder="e.g. Bank Street Clinic">
       <div class="row"><button class="primary" type="submit">✓ Save</button><button class="secondary" type="button" data-close>Cancel</button></div>
@@ -840,7 +919,7 @@ function openForm(a={}, p=null){
     e.preventDefault();
     const title = sheet.querySelector('#fTitle').value.trim() || 'Appointment';
     const date = sheet.querySelector('#fDate').value; if(!date){ sheet.querySelector('#fDate').focus(); return; }
-    commit({...a, title, date, time: sheet.querySelector('#fTime').value || null, place: sheet.querySelector('#fPlace').value.trim(),
+    commit({...a, title, date, time: sheet.querySelector('#fTime').value || null, duration: +sheet.querySelector('#fDur').value || null, place: sheet.querySelector('#fPlace').value.trim(),
             cat: categorize(title + ' ' + (p?.raw||''))});
   });
 }
@@ -856,17 +935,17 @@ function toast(msg, undo){
 document.getElementById('toastUndo').onclick = () => { if(undoFn) undoFn(); undoFn = null; document.getElementById('toast').classList.remove('show'); };
 
 function commit(d){
-  const clean = {id: d.id || uid(), title: d.title, date: d.date, time: d.time || null, place: d.place || '', cat: d.cat || categorize(d.title)};
+  const clean = {id: d.id || uid(), title: d.title, date: d.date, time: d.time || null, duration: d.time && d.duration ? d.duration : null, place: d.place || '', cat: d.cat || categorize(d.title)};
   const before = JSON.stringify(state.appts);
   const i = state.appts.findIndex(a=>a.id===clean.id);
   if(i>=0) state.appts[i] = clean; else state.appts.push(clean);
   save(); closeSheet();
   const dt = fromYmd(clean.date); cursor = new Date(dt.getFullYear(), dt.getMonth(), 1);
   renderAll();
-  const msg = `Saved: ${clean.title}, ${fmtDate(clean.date)} at ${fmtTime(clean.time)}.`;
+  const msg = `Saved: ${clean.title}, ${fmtDate(clean.date)}, ${fmtRange(clean.time, clean.duration)}.`;
   toast(msg, () => { state.appts = JSON.parse(before); save(); renderAll(); say('Undone.'); });
   say(msg);
-  if(d._voice) speak(`Saved. ${clean.title}, ${fmtDate(clean.date)}, ${atTime(clean.time)}.`);
+  if(d._voice) speak(`Saved. ${clean.title}, ${fmtDate(clean.date)}, ${atTime(clean.time, clean.duration)}.`);
 }
 function confirmDelete(id){
   const a = state.appts.find(x=>x.id===id); if(!a) return;
