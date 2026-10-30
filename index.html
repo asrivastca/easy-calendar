@@ -208,6 +208,7 @@
   </div>
 
   <main id="main"></main>
+  <p style="margin-top:28px;text-align:center;color:var(--muted);font-size:.85rem">Easy Calendar · version 1.4</p>
 </div>
 
 <div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
@@ -624,6 +625,14 @@ function mergeSegment(base, seg){
 // Remove filler sounds and words/phrases said twice in a row ("doctor doctor", "at 6:30 at 6:30").
 function cleanTranscript(s){
   let w = wordsOf(String(s).replace(/\b(um+|uh+|er+|hmm+|ah+)\b[,.]?/gi, ' '));
+  // Some phones send the whole sentence again after every word:
+  // "I I have I have an I have an appointment ..." -> split wherever the opening word
+  // comes back, then merge the pieces (a longer restatement replaces the shorter one).
+  if(w.length > 1){
+    const first = normWord(w[0]), pieces = [[]];
+    for(const x of w){ if(normWord(x) === first && pieces[pieces.length-1].length) pieces.push([]); pieces[pieces.length-1].push(x); }
+    if(pieces.length > 1) w = wordsOf(pieces.map(p => p.join(' ')).reduce((acc, p) => mergeSegment(acc, p), ''));
+  }
   for(let n = 4; n >= 1; n--){
     const out = [];
     for(const x of w){
