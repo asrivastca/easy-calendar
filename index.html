@@ -143,6 +143,9 @@
   .choices button{min-height:64px;border-radius:12px;border:3px solid var(--ink);background:#fff;font-weight:700;font-size:1.05rem}
   .choices button[aria-pressed="true"]{background:var(--ink);color:#fff}
 
+  .vbar{margin-top:14px;display:flex;flex-wrap:wrap;align-items:center;gap:10px;background:var(--primary-soft);border:2px solid #9DB5F5;border-radius:14px;padding:10px 14px;font-weight:700}
+  .vbar #vheard{font-weight:400;flex:1;min-width:0}
+  .vbar button{min-height:52px;border-radius:10px;border:2px solid var(--ink);background:#fff;font-weight:700;padding:0 14px;margin-left:auto}
   label.f{display:block;font-weight:700;margin:14px 0 6px;font-size:1.1rem}
   input.f{width:100%;min-height:64px;border:3px solid var(--ink);border-radius:12px;padding:0 14px;font-size:1.25rem;background:#fff}
 
@@ -208,7 +211,7 @@
   </div>
 
   <main id="main"></main>
-  <p style="margin-top:28px;text-align:center;color:var(--muted);font-size:.85rem">Easy Calendar · version 1.4</p>
+  <p style="margin-top:28px;text-align:center;color:var(--muted);font-size:.85rem">Easy Calendar · version 1.5</p>
 </div>
 
 <div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
@@ -506,13 +509,14 @@ function renderAll(){
 const overlay = document.getElementById('overlay'), sheet = document.getElementById('sheet');
 let lastFocus = null;
 function openSheet(html){
-  lastFocus = document.activeElement;
+  cancelVoice();
+  if(!overlay.classList.contains('open')) lastFocus = document.activeElement;
   sheet.innerHTML = html; overlay.classList.add('open');
   sheet.querySelectorAll('[data-close]').forEach(b => b.onclick = closeSheet);
   const f = sheet.querySelector('[autofocus]') || sheet.querySelector('button, textarea, input');
   setTimeout(()=> f && f.focus(), 30);
 }
-function closeSheet(){ stopListening(); stopSpeaking(); overlay.classList.remove('open'); sheet.innerHTML=''; lastFocus && lastFocus.focus && lastFocus.focus(); }
+function closeSheet(){ cancelVoice(); overlay.classList.remove('open'); sheet.innerHTML=''; lastFocus && lastFocus.focus && lastFocus.focus(); }
 overlay.addEventListener('click', e => { if(e.target===overlay) closeSheet(); });
 document.addEventListener('keydown', e => { if(e.key==='Escape' && overlay.classList.contains('open')) closeSheet(); });
 const head = title => `<div class="sheet-head"><h2 id="sheetTitle">${title}</h2><button class="close" data-close>✕ Close</button></div>`;
@@ -550,60 +554,81 @@ function openType(prefill=''){
   sheet.querySelector('#toForm').onclick = () => openForm({});
 }
 
-/* ---------- Speak ---------- */
-let rec = null;
+/* ---------- Voice: speak, then listen ---------- */
+let rec = null, voiceToken = 0;
+const SRClass = () => window.SpeechRecognition || window.webkitSpeechRecognition;
 function stopListening(){ try{ stopListening._clear && stopListening._clear(); }catch(e){} const r = rec; rec = null; try{ r && r.abort(); }catch(e){} }
-function openSpeak(){
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if(!SR){ return openTypeWithNotice('Voice is not available in this browser. Please type it instead — or open the app in Chrome, Edge or Safari to use voice.'); }
+function cancelVoice(){ voiceToken++; stopListening(); stopSpeaking(); }
+
+// Speak a sentence, then call cb once it has finished (with a safety timer in case the browser never says it ended).
+function speakThen(text, cb){
+  const tok = voiceToken; let done = false;
+  const go = () => { if(done) return; done = true; if(tok === voiceToken) setTimeout(() => { if(tok === voiceToken) cb(); }, 350); };
+  try{
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text); u.rate = 0.9; u.lang = 'en-CA';
+    u.onend = go; u.onerror = go; speechSynthesis.speak(u);
+    setTimeout(go, 2000 + text.length * 85);
+  }catch(e){ go(); }
+}
+
+// Listen until the person has been quiet for silenceMs. Calls onDone(text, error).
+function listen({silenceMs = 4000, startWaitMs = 10000, quick = null, onUpdate, onDone}){
+  const SR = SRClass(); if(!SR){ onDone(null, 'unsupported'); return null; }
+  const tok = voiceToken;
+  let committed = '', session = '', finished = false, timer = null;
+  const current = () => cleanTranscript(mergeSegment(committed, session));
+  const arm = ms => { clearTimeout(timer); timer = setTimeout(() => finish(), ms); };
+  function finish(err){ if(finished) return; finished = true; clearTimeout(timer); const r = rec; rec = null; try{ r && r.abort(); }catch(e){}
+    if(tok === voiceToken) onDone(current(), err || null); }
+  stopListening._clear = () => { finished = true; clearTimeout(timer); };
+  const start = () => {
+    // One phrase per session (continuous=false) avoids Android's repeated/cumulative results.
+    const me = rec = new SR(); me.lang = 'en-CA'; me.interimResults = true; me.continuous = false; me.maxAlternatives = 1;
+    me.onresult = e => {
+      if(rec !== me) return;
+      session = Array.from(e.results).reduce((acc, r) => mergeSegment(acc, r[0].transcript), '');
+      const t = current(); onUpdate && onUpdate(t);
+      arm(quick && quick.test(t.trim()) ? 1500 : silenceMs);
+    };
+    me.onerror = e => { if(finished || rec !== me) return; if(e.error === 'no-speech' || e.error === 'aborted') return; finish(e.error); };
+    me.onend = () => { if(finished || rec !== me) return; committed = mergeSegment(committed, session); session = '';
+      try{ start(); }catch(err){ finish('error'); } };
+    me.start();
+  };
+  try{ start(); arm(startWaitMs); }catch(e){ finished = true; onDone(null, 'error'); return null; }
+  return { finish: () => finish() };
+}
+
+const MIC_OFF = e => e === 'not-allowed' || e === 'service-not-allowed';
+
+/* ---------- "Say an appointment" ---------- */
+function openSpeak(tries = 0){
+  if(!SRClass()) return openTypeWithNotice('Voice is not available in this browser. Please type it instead — or open the app in Chrome, Edge or Safari to use voice.');
   openSheet(`${head('Say your appointment')}
-    <div class="mic"><div class="dot" aria-hidden="true">🎤</div><div class="state" id="micState">Listening… go ahead</div><div style="color:var(--muted);font-size:1rem;text-align:center">I'll wait until you've been quiet for 4 seconds, or tap <b>I'm done talking</b>.</div>
+    <div class="mic"><div class="dot" aria-hidden="true">🎤</div><div class="state" id="micState">🔊 Listen…</div>
+      <div style="color:var(--muted);font-size:1rem;text-align:center">I'll wait until you've been quiet for 4 seconds, or tap <b>I'm done talking</b>.</div>
       <div class="hint" style="width:100%">Say something like: <b>“I have an appointment with my family doctor at 6:30 a.m. on Tuesday, November 10th.”</b></div>
       <div class="heard" id="heard" aria-live="polite"></div></div>
     <div class="row"><button class="primary" id="doneTalk">I'm done talking</button><button class="secondary" id="typeInstead">Type instead</button></div>`);
-  /* Keep listening until the person has been quiet for SILENCE_MS.
-     Browsers stop recognition after ~1s of silence on their own, so we
-     restart it quietly and decide ourselves when the person is finished. */
-  const SILENCE_MS = 4000;       // pause allowed between words / phrases
-  const START_WAIT_MS = 10000;   // time allowed before they start speaking
-  let committed = '', session = '', handled = false, silenceTimer = null;
   const heard = sheet.querySelector('#heard'), stateEl = sheet.querySelector('#micState');
-  const current = () => cleanTranscript(mergeSegment(committed, session));
-  const armTimer = ms => { clearTimeout(silenceTimer); silenceTimer = setTimeout(finish, ms); };
-  const finish = () => { if(handled) return; handled = true; clearTimeout(silenceTimer); const t = current(); stopListening();
-    if(!t) return openTypeWithNotice("I didn't hear anything. You can try again, or type it here."); showConfirm(parseAppointment(t)); };
-  stopListening._clear = () => clearTimeout(silenceTimer);
-  sheet.querySelector('#doneTalk').onclick = finish;
-  sheet.querySelector('#typeInstead').onclick = () => { handled = true; clearTimeout(silenceTimer); stopListening(); openType(current()); };
-  const startRec = () => {
-    // One phrase per session (continuous=false): avoids Android Chrome's repeated/cumulative results.
-    const me = rec = new SR(); rec.lang = 'en-CA'; rec.interimResults = true; rec.continuous = false; rec.maxAlternatives = 1;
-    rec.onresult = e => {
-      if(rec !== me) return;
-      // Rebuild this phrase from scratch each time instead of appending pieces.
-      session = Array.from(e.results).reduce((acc, r) => mergeSegment(acc, r[0].transcript), '');
-      heard.textContent = current();
-      stateEl.textContent = 'Listening… take your time';
-      armTimer(SILENCE_MS);
-    };
-    rec.onerror = e => {
-      if(handled || rec !== me) return;
-      if(e.error==='no-speech' || e.error==='aborted') return;   // onend restarts; our timer decides when to stop
-      handled = true; clearTimeout(silenceTimer); rec = null;
-      const msg = (e.error==='not-allowed'||e.error==='service-not-allowed') ? 'The microphone is turned off for this page. Please type it instead.' :
-                  'Voice stopped working. Please type it instead.';
-      openTypeWithNotice(msg, current());
-    };
-    rec.onend = () => {
-      if(handled || rec !== me) return;   // closed or replaced: don't restart
-      committed = mergeSegment(committed, session); session = '';
-      try{ startRec(); }catch(err){ finish(); }
-    };
-    rec.start();
-  };
-  try{ startRec(); armTimer(START_WAIT_MS); }
-  catch(err){ handled = true; openTypeWithNotice('Voice could not start here. Please type it instead.'); }
+  let l = null;
+  sheet.querySelector('#doneTalk').onclick = () => l && l.finish();
+  sheet.querySelector('#typeInstead').onclick = () => { const t = heard.textContent; cancelVoice(); openType(t); };
+  const prompt = tries ? "I didn't hear anything. Please tell me about your appointment." : 'Tell me about your appointment.';
+  speakThen(prompt, () => {
+    stateEl.textContent = 'Listening… go ahead';
+    l = listen({
+      onUpdate: t => { heard.textContent = t; stateEl.textContent = 'Listening… take your time'; },
+      onDone: (t, err) => {
+        if(MIC_OFF(err)) return openTypeWithNotice('The microphone is turned off for this page. Please type it instead.', t || '');
+        if(!t){ if(tries < 1) return openSpeak(tries + 1); return openTypeWithNotice("I still didn't hear anything. You can type it here instead.") ; }
+        showConfirm(parseAppointment(t), null, true);
+      }
+    });
+  });
 }
+function openTypeWithNotice(msg, prefill=''){ openType(prefill); sheet.querySelector('.sheet-head').insertAdjacentHTML('afterend', `<div class="notice" role="alert">${esc(msg)}</div>`); }
 
 /* ---------- Voice transcript clean-up ---------- */
 const wordsOf = s => String(s||'').trim().split(/\s+/).filter(Boolean);
@@ -647,59 +672,153 @@ function cleanTranscript(s){
   return w.join(' ');
 }
 window.mergeSegment = mergeSegment; window.cleanTranscript = cleanTranscript;
-function openTypeWithNotice(msg, prefill=''){ openType(prefill); sheet.querySelector('.sheet-head').insertAdjacentHTML('afterend', `<div class="notice" role="alert">${esc(msg)}</div>`); }
 
-/* ---------- Confirm (read back + resolve questions) ---------- */
-function showConfirm(p, draft){
-  const d = draft || {title:p.title, date:p.date, time:p.time, cat:p.cat, place:'', id:null};
-  const qs = [];
+/* ---------- Confirm: fill in what's missing (by voice first), then read back ---------- */
+const YES_RE = /\b(yes|yeah|yep|yup|correct|right|sure|ok|okay|save|that's it|perfect|good)\b/i;
+const NO_RE = /\b(no|nope|wrong|not right|change|fix)\b/i;
+const CANCEL_RE = /\b(cancel|never ?mind|forget it|don't save|do not save|stop)\b/i;
+const QUICK_RE = /^(yes|yeah|yep|yup|no|nope|correct|ok|okay|save it|cancel|morning|afternoon|evening)\.?$/i;
+const NUM_WORDS = {one:1,two:2,three:3,four:4,five:5,six:6,seven:7,eight:8,nine:9,ten:10,eleven:11,twelve:12};
+const numWordsToDigits = t => t.replace(/\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b/gi, w => NUM_WORDS[w.toLowerCase()]);
+const dayNum = s => fromYmd(s).getDate();
+const atTime = t => t ? `at ${fmtTimeSpoken(t)}` : 'with no set time';
+
+function showConfirm(p, draft, voice){
+  const d = draft || {title:p.title, date:p.date, time:p.time, cat:p.cat, place:'', id:null,
+                      _timeGuessed: !!(p.time && p.timeGuessed), _voice: !!voice, _tries:{}};
+  d._tries = d._tries || {};
+  const next = nd => showConfirm(p, {...d, ...nd});
+
+  /* ---- What is still missing? (in order) ---- */
+  const qs = [];   // {key, html, say, handle(text) -> changes | null}
   if(p && p.conflict && !d._resolvedConflict){
-    qs.push(`<div class="question"><p>⚠️ ${fmtDate(p.conflict.actual).split(',')[1].trim()} is a ${fmtDate(p.conflict.actual).split(',')[0]}, not a ${p.conflict.saidWeekday}. Which did you mean?</p>
-      <div class="choices"><button data-pick="${p.conflict.actual}">${fmtDate(p.conflict.actual)}</button><button data-pick="${p.conflict.alternative}">${fmtDate(p.conflict.alternative)}</button></div></div>`);
+    const A = p.conflict.actual, B = p.conflict.alternative;
+    qs.push({key:'conflict',
+      html:`<p>⚠️ ${fmtDate(A).split(',')[1].trim()} is a ${fmtDate(A).split(',')[0]}, not a ${p.conflict.saidWeekday}. Which did you mean?</p>
+        <div class="choices"><button data-pick="${A}">${fmtDate(A)}</button><button data-pick="${B}">${fmtDate(B)}</button></div>`,
+      say:`${fmtDate(A).split(',')[1].trim()} is a ${fmtDate(A).split(',')[0]}, not a ${p.conflict.saidWeekday}. Did you mean ${fmtDate(A)}, or ${fmtDate(B)}?`,
+      handle: t => {
+        const lt = ' ' + normalize(t) + ' ', r = parseAppointment(t);
+        const hit = s => lt.includes(fmtDate(s).split(',')[0].toLowerCase()) || new RegExp(`\\b${dayNum(s)}(st|nd|rd|th)?\\b`).test(lt) || r.date === s;
+        let a = hit(A) || /\bfirst\b|\b1st\b/.test(lt), b = hit(B) || /\b(second|2nd|other|last)\b/.test(lt);
+        if(a && !b) return {date:A, _resolvedConflict:true};
+        if(b && !a) return {date:B, _resolvedConflict:true};
+        return null; }});
+  }
+  if((!d.title || d.title === 'Appointment') && !d._titleOk){
+    qs.push({key:'title',
+      html:`<p>What is the appointment for?</p><div class="choices"><button data-title-skip>Just call it “Appointment”</button><button data-title-type>Type it</button></div>`,
+      say:'What is the appointment for? For example, the dentist, or lunch with a friend.',
+      handle: t => { const r = parseAppointment(t); if(!r.title || r.title === 'Appointment') return null;
+        const ch = {title:r.title, cat:categorize(t), _titleOk:true}; if(!d.date && r.date) ch.date = r.date; if(!d.time && r.time){ ch.time = r.time; ch._timeGuessed = r.timeGuessed; } return ch; }});
   }
   if(!d.date){
-    const t = new Date();
-    qs.push(`<div class="question"><p>Which day?</p><div class="choices">
-      <button data-pick="${ymd(t)}">Today</button><button data-pick="${ymd(addDays(t,1))}">Tomorrow</button>
-      <button data-pick="__other">Another day…</button></div></div>`);
+    const t0 = new Date();
+    qs.push({key:'date',
+      html:`<p>Which day?</p><div class="choices"><button data-pick="${ymd(t0)}">Today</button><button data-pick="${ymd(addDays(t0,1))}">Tomorrow</button><button data-pick="__other">Another day…</button></div>`,
+      say:'What day is it?  For example, tomorrow, or Tuesday, November 10th.',
+      handle: t => { const r = parseAppointment(t); if(!r.date) return null; const ch = {date:r.date}; if(!d.time && r.time){ ch.time = r.time; ch._timeGuessed = r.timeGuessed; } return ch; }});
   }
   if(!d.time && !d._anyTime){
-    qs.push(`<div class="question"><p>What time?</p><div class="choices">
-      <button data-time="09:00">9:00 AM</button><button data-time="10:00">10:00 AM</button><button data-time="13:00">1:00 PM</button>
-      <button data-time="15:00">3:00 PM</button><button data-time="__other">Another time…</button><button data-time="__none">No set time</button></div></div>`);
-  } else if(p && p.timeGuessed && !d._timeOk){
-    const [h,mi] = d.time.split(':').map(Number); const flip = `${pad((h+12)%24)}:${pad(mi)}`;
-    qs.push(`<div class="question"><p>Is that in the morning or afternoon?</p><div class="choices">
-      <button data-ampm="${h<12?d.time:flip}">${fmtTime(h<12?d.time:flip)} (morning)</button>
-      <button data-ampm="${h>=12?d.time:flip}">${fmtTime(h>=12?d.time:flip)} (afternoon/evening)</button></div></div>`);
+    qs.push({key:'time',
+      html:`<p>What time?</p><div class="choices"><button data-time="09:00">9:00 AM</button><button data-time="10:00">10:00 AM</button><button data-time="13:00">1:00 PM</button>
+        <button data-time="15:00">3:00 PM</button><button data-time="__other">Another time…</button><button data-time="__none">No set time</button></div>`,
+      say:'What time is it? If there is no set time, just say: no time.',
+      handle: t => {
+        if(/\b(no (set |particular )?time|any ?time|all day|doesn't matter|not sure|don't know)\b/i.test(t)) return {time:null, _anyTime:true};
+        const r = parseAppointment('at ' + numWordsToDigits(t)); if(!r.time) return null;
+        return {time:r.time, _timeGuessed:r.timeGuessed, _timeOk:!r.timeGuessed}; }});
+  } else if(d.time && d._timeGuessed && !d._timeOk){
+    const [h,mi] = d.time.split(':').map(Number), am = `${pad(h%12)}:${pad(mi)}`, pm = `${pad(h%12+12)}:${pad(mi)}`;
+    qs.push({key:'ampm',
+      html:`<p>Is that in the morning or afternoon?</p><div class="choices"><button data-ampm="${am}">${fmtTime(am)} (morning)</button><button data-ampm="${pm}">${fmtTime(pm)} (afternoon/evening)</button></div>`,
+      say:`Is that ${h%12||12} ${mi?pad(mi):''} in the morning, or in the afternoon?`,
+      handle: t => { if(/\b(morning|a\.? ?m|before noon)\b/i.test(t)) return {time:am, _timeOk:true};
+        if(/\b(afternoon|evening|night|p\.? ?m|after noon)\b/i.test(t)) return {time:pm, _timeOk:true}; return null; }});
+  }
+  if(d._changing){
+    qs.push({key:'change', html:`<p>What would you like to change?</p><div class="choices"><button data-change="date">The day</button><button data-change="time">The time</button><button data-change="title">What it is</button></div>`,
+      say:'What would you like to change? You can say a new day, a new time, or a new name.',
+      handle: t => {
+        if(CANCEL_RE.test(t)) return {_cancel:true};
+        if(/^\s*(the\s+)?(day|date)\s*$/i.test(t)) return {date:null, _changing:false};
+        if(/^\s*(the\s+)?time\s*$/i.test(t)) return {time:null, _anyTime:false, _timeOk:false, _changing:false};
+        if(/^\s*(the\s+)?(name|title|what it is)\s*$/i.test(t)) return {title:'Appointment', _titleOk:false, _changing:false};
+        const r = parseAppointment(t), ch = {_changing:false}; let any = false;
+        if(r.date){ ch.date = r.date; any = true; }
+        if(r.time){ ch.time = r.time; ch._timeGuessed = r.timeGuessed; ch._timeOk = !r.timeGuessed; any = true; }
+        if(!any && r.title && r.title !== 'Appointment' && !NO_RE.test(t)){ ch.title = r.title; ch.cat = categorize(t); any = true; }
+        return any ? ch : null; }});
   }
   const ready = !qs.length;
+  if(ready) qs.push({key:'final', html:'', say:`${d.title}. ${fmtDate(d.date)}, ${atTime(d.time)}. Shall I save it? Please say yes, or no.`,
+    handle: t => { if(CANCEL_RE.test(t)) return {_cancel:true}; if(YES_RE.test(t) && !NO_RE.test(t)) return {_save:true};
+      if(NO_RE.test(t)){ const r = parseAppointment(t), ch = {}; if(r.date) ch.date = r.date; if(r.time){ ch.time = r.time; ch._timeGuessed = r.timeGuessed; ch._timeOk = !r.timeGuessed; }
+        return Object.keys(ch).length ? ch : {_changing:true}; }
+      return null; }});
+  const q = qs[0];
+
   openSheet(`${head(ready ? 'Is this right?' : 'Just a quick question')}
     ${p && p.raw ? `<p style="margin:0 0 10px;color:var(--muted)">You said: “${esc(p.raw)}”</p>` : ''}
     <div class="confirm"><div class="top"><span class="ico" aria-hidden="true">${d.cat.icon}</span>
       <div><div class="what">${esc(d.title)}</div><div class="cat">${d.cat.label}</div></div></div>
       <dl><dt>Day</dt><dd>${d.date ? fmtDateYear(d.date) + (relDay(d.date)?` <span style="font-weight:400">(${relDay(d.date)})</span>`:'') : '—'}</dd>
           <dt>Time</dt><dd>${d.time ? fmtTime(d.time) : (d._anyTime ? 'Any time' : '—')}</dd></dl></div>
-    ${qs.join('')}
+    ${q.html ? `<div class="question">${q.html}</div>` : ''}
+    ${d._voice ? `<div class="vbar" id="vbar"><span id="vstate">🔊 Asking…</span><span id="vheard"></span><button id="vstop">Stop voice</button></div>` : ''}
     <div class="row">
-      ${ready ? `<button class="primary" id="saveIt" autofocus>✓ Yes, save it</button>` : ''}
-      <button class="secondary" id="changeIt">✎ Change something</button>
+      ${ready ? `<button class="primary" id="saveIt">✓ Yes, save it</button>` : ''}
+      ${!d._changing ? `<button class="secondary" id="changeIt">✎ Change something</button>` : ''}
     </div>
-    <div class="row" style="margin-top:6px"><button class="linkish" id="readBack" style="flex:0 0 auto">🔊 Read it to me</button>
+    <div class="row" style="margin-top:6px">
+      ${d._voice ? '' : `<button class="linkish" id="readBack" style="flex:0 0 auto">🔊 Read it to me</button>`}
       <button class="linkish" id="startOver" style="flex:0 0 auto">✎ Fix the words</button></div>`);
 
+  /* ---- Tapping always works ---- */
   sheet.querySelectorAll('[data-pick]').forEach(b => b.onclick = () => {
-    if(b.dataset.pick==='__other'){ return openForm({...d, date: ymd(new Date())}, p); }
-    showConfirm(p, {...d, date:b.dataset.pick, _resolvedConflict:true}); });
+    if(b.dataset.pick === '__other') return openForm({...d, date: ymd(new Date())}, p);
+    next({date:b.dataset.pick, _resolvedConflict:true}); });
   sheet.querySelectorAll('[data-time]').forEach(b => b.onclick = () => {
-    if(b.dataset.time==='__other') return openForm({...d, time:'09:00'}, p);
-    if(b.dataset.time==='__none') return showConfirm(p, {...d, time:null, _anyTime:true});
-    showConfirm(p, {...d, time:b.dataset.time, _timeOk:true}); });
-  sheet.querySelectorAll('[data-ampm]').forEach(b => b.onclick = () => showConfirm(p, {...d, time:b.dataset.ampm, _timeOk:true}));
+    if(b.dataset.time === '__other') return openForm({...d, time:'09:00'}, p);
+    if(b.dataset.time === '__none') return next({time:null, _anyTime:true});
+    next({time:b.dataset.time, _timeOk:true}); });
+  sheet.querySelectorAll('[data-ampm]').forEach(b => b.onclick = () => next({time:b.dataset.ampm, _timeOk:true}));
+  sheet.querySelectorAll('[data-change]').forEach(b => b.onclick = () => {
+    const k = b.dataset.change;
+    next(k === 'date' ? {date:null, _changing:false} : k === 'time' ? {time:null, _anyTime:false, _timeOk:false, _changing:false} : {title:'Appointment', _titleOk:false, _changing:false}); });
+  const skip = sheet.querySelector('[data-title-skip]'); if(skip) skip.onclick = () => next({_titleOk:true});
+  const typ = sheet.querySelector('[data-title-type]'); if(typ) typ.onclick = () => openForm(d, p);
   const sv = sheet.querySelector('#saveIt'); if(sv) sv.onclick = () => commit(d);
-  sheet.querySelector('#changeIt').onclick = () => openForm(d, p);
-  sheet.querySelector('#readBack').onclick = () => speak(`${d.title}. ${d.date?fmtDate(d.date):'No day yet'}, at ${fmtTimeSpoken(d.time)}.` + (ready?' Is this right?':''));
+  const ci = sheet.querySelector('#changeIt'); if(ci) ci.onclick = () => d._voice ? next({_changing:true}) : openForm(d, p);
+  const rb = sheet.querySelector('#readBack'); if(rb) rb.onclick = () => speak(q.say);
   sheet.querySelector('#startOver').onclick = () => openType(p && p.raw || '');
+  const vs = sheet.querySelector('#vstop');
+  if(vs) vs.onclick = () => { cancelVoice(); d._voice = false; sheet.querySelector('#vbar').innerHTML = '<span>Voice is off. Tap your answer.</span>'; };
+
+  /* ---- Voice: ask the question out loud, then listen for the answer ---- */
+  if(!d._voice || !SRClass()) return;
+  const vstate = sheet.querySelector('#vstate'), vheard = sheet.querySelector('#vheard');
+  const tries = d._tries[q.key] || 0;
+  const ask = (tries ? "Sorry, I didn't catch that. " : '') + q.say;
+  speakThen(ask, () => {
+    vstate.textContent = '🎤 Listening for your answer…';
+    listen({ quick: QUICK_RE,
+      onUpdate: t => { vheard.textContent = ` “${t}”`; },
+      onDone: (t, err) => {
+        if(MIC_OFF(err)){ vstate.textContent = 'The microphone is off. Please tap your answer.'; return; }
+        t = (t || '').replace(/[!?,]+/g, ' ').replace(/\.(?=\s|$)/g, ' ').replace(/\s+/g, ' ').trim();
+        const ch = t ? q.handle(t) : null;
+        if(ch && ch._cancel){ closeSheet(); speak("Okay. I didn't save it."); return; }
+        if(ch && ch._save) return commit(d);
+        if(ch) return next({...ch, _tries:{}});
+        if(tries + 1 >= 2){   // asked twice without a usable answer -> hand over to the screen
+          vstate.textContent = 'Please tap your answer on the screen.'; vheard.textContent = '';
+          speakThen("I'm having trouble understanding. Please tap your answer on the screen.", () => {});
+          return;
+        }
+        next({_tries:{...d._tries, [q.key]: tries + 1}});
+      }});
+  });
 }
 
 /* ---------- Simple form ---------- */
@@ -747,6 +866,7 @@ function commit(d){
   const msg = `Saved: ${clean.title}, ${fmtDate(clean.date)} at ${fmtTime(clean.time)}.`;
   toast(msg, () => { state.appts = JSON.parse(before); save(); renderAll(); say('Undone.'); });
   say(msg);
+  if(d._voice) speak(`Saved. ${clean.title}, ${fmtDate(clean.date)}, ${atTime(clean.time)}.`);
 }
 function confirmDelete(id){
   const a = state.appts.find(x=>x.id===id); if(!a) return;
@@ -769,7 +889,7 @@ function say(text){ const el = document.getElementById('srLive'); el.textContent
 /* =========================================================
    Wire up
    ========================================================= */
-document.getElementById('speakBtn').onclick = openSpeak;
+document.getElementById('speakBtn').onclick = () => openSpeak();
 document.getElementById('typeBtn').onclick = () => openType();
 document.getElementById('viewMonth').onclick = () => { state.view='month'; save(); renderAll(); };
 document.getElementById('viewList').onclick = () => { state.view='list'; save(); renderAll(); };
