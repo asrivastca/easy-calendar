@@ -565,35 +565,37 @@ function openSpeak(){
      restart it quietly and decide ourselves when the person is finished. */
   const SILENCE_MS = 4000;       // pause allowed between words / phrases
   const START_WAIT_MS = 10000;   // time allowed before they start speaking
-  let finalText = '', interim = '', handled = false, silenceTimer = null;
+  let committed = '', session = '', handled = false, silenceTimer = null;
   const heard = sheet.querySelector('#heard'), stateEl = sheet.querySelector('#micState');
+  const current = () => cleanTranscript(mergeSegment(committed, session));
   const armTimer = ms => { clearTimeout(silenceTimer); silenceTimer = setTimeout(finish, ms); };
-  const finish = () => { if(handled) return; handled = true; clearTimeout(silenceTimer); const t = (finalText + ' ' + interim).trim(); stopListening();
+  const finish = () => { if(handled) return; handled = true; clearTimeout(silenceTimer); const t = current(); stopListening();
     if(!t) return openTypeWithNotice("I didn't hear anything. You can try again, or type it here."); showConfirm(parseAppointment(t)); };
   stopListening._clear = () => clearTimeout(silenceTimer);
   sheet.querySelector('#doneTalk').onclick = finish;
-  sheet.querySelector('#typeInstead').onclick = () => { handled = true; clearTimeout(silenceTimer); stopListening(); openType((finalText+' '+interim).trim()); };
+  sheet.querySelector('#typeInstead').onclick = () => { handled = true; clearTimeout(silenceTimer); stopListening(); openType(current()); };
   const startRec = () => {
-    const me = rec = new SR(); rec.lang = 'en-CA'; rec.interimResults = true; rec.continuous = true; rec.maxAlternatives = 1;
+    // One phrase per session (continuous=false): avoids Android Chrome's repeated/cumulative results.
+    const me = rec = new SR(); rec.lang = 'en-CA'; rec.interimResults = true; rec.continuous = false; rec.maxAlternatives = 1;
     rec.onresult = e => {
-      interim = '';
-      for(let i=e.resultIndex;i<e.results.length;i++){ const r = e.results[i]; if(r.isFinal) finalText += r[0].transcript + ' '; else interim += r[0].transcript; }
-      heard.textContent = (finalText + interim).trim();
+      if(rec !== me) return;
+      // Rebuild this phrase from scratch each time instead of appending pieces.
+      session = Array.from(e.results).reduce((acc, r) => mergeSegment(acc, r[0].transcript), '');
+      heard.textContent = current();
       stateEl.textContent = 'Listening… take your time';
       armTimer(SILENCE_MS);
     };
     rec.onerror = e => {
       if(handled || rec !== me) return;
-      if(e.error==='no-speech' || e.error==='aborted') return;   // onend will restart; our timer decides when to stop
+      if(e.error==='no-speech' || e.error==='aborted') return;   // onend restarts; our timer decides when to stop
       handled = true; clearTimeout(silenceTimer); rec = null;
       const msg = (e.error==='not-allowed'||e.error==='service-not-allowed') ? 'The microphone is turned off for this page. Please type it instead.' :
                   'Voice stopped working. Please type it instead.';
-      openTypeWithNotice(msg, (finalText+' '+interim).trim());
+      openTypeWithNotice(msg, current());
     };
     rec.onend = () => {
       if(handled || rec !== me) return;   // closed or replaced: don't restart
-      // keep what was heard so far, then quietly start listening again
-      if(interim){ finalText += interim + ' '; interim = ''; }
+      committed = mergeSegment(committed, session); session = '';
       try{ startRec(); }catch(err){ finish(); }
     };
     rec.start();
@@ -601,6 +603,41 @@ function openSpeak(){
   try{ startRec(); armTimer(START_WAIT_MS); }
   catch(err){ handled = true; openTypeWithNotice('Voice could not start here. Please type it instead.'); }
 }
+
+/* ---------- Voice transcript clean-up ---------- */
+const wordsOf = s => String(s||'').trim().split(/\s+/).filter(Boolean);
+const normWord = w => w.toLowerCase().replace(/[^\w:']/g,'');
+// Join a new piece of speech onto what we already have, without repeating words.
+function mergeSegment(base, seg){
+  const a = wordsOf(base), b = wordsOf(seg);
+  if(!b.length) return a.join(' '); if(!a.length) return b.join(' ');
+  const la = a.map(normWord), lb = b.map(normWord);
+  // new piece already contains everything so far (cumulative result) -> use it
+  if(lb.length >= la.length && la.every((w,i) => w === lb[i])) return b.join(' ');
+  // new piece is just a repeat of the end of what we have -> ignore it
+  if(lb.length <= la.length && lb.every((w,i) => w === la[la.length - lb.length + i])) return a.join(' ');
+  // otherwise drop the overlap between the end of base and the start of the new piece
+  let k = Math.min(la.length, lb.length);
+  for(; k > 0; k--) if(lb.slice(0,k).every((w,i) => w === la[la.length - k + i])) break;
+  return a.concat(b.slice(k)).join(' ');
+}
+// Remove filler sounds and words/phrases said twice in a row ("doctor doctor", "at 6:30 at 6:30").
+function cleanTranscript(s){
+  let w = wordsOf(String(s).replace(/\b(um+|uh+|er+|hmm+|ah+)\b[,.]?/gi, ' '));
+  for(let n = 4; n >= 1; n--){
+    const out = [];
+    for(const x of w){
+      out.push(x);
+      if(out.length >= 2*n){
+        const A = out.slice(-2*n, -n).map(normWord).join(' '), B = out.slice(-n).map(normWord).join(' ');
+        if(A === B) out.splice(-n, n);
+      }
+    }
+    w = out;
+  }
+  return w.join(' ');
+}
+window.mergeSegment = mergeSegment; window.cleanTranscript = cleanTranscript;
 function openTypeWithNotice(msg, prefill=''){ openType(prefill); sheet.querySelector('.sheet-head').insertAdjacentHTML('afterend', `<div class="notice" role="alert">${esc(msg)}</div>`); }
 
 /* ---------- Confirm (read back + resolve questions) ---------- */
@@ -640,7 +677,7 @@ function showConfirm(p, draft){
       <button class="secondary" id="changeIt">✎ Change something</button>
     </div>
     <div class="row" style="margin-top:6px"><button class="linkish" id="readBack" style="flex:0 0 auto">🔊 Read it to me</button>
-      <button class="linkish" id="startOver" style="flex:0 0 auto">Start over</button></div>`);
+      <button class="linkish" id="startOver" style="flex:0 0 auto">✎ Fix the words</button></div>`);
 
   sheet.querySelectorAll('[data-pick]').forEach(b => b.onclick = () => {
     if(b.dataset.pick==='__other'){ return openForm({...d, date: ymd(new Date())}, p); }
