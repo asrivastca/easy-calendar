@@ -1,0 +1,715 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Easy Calendar — Seniors Daily Helper (v1)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --scale:1;
+    --bg:#FFFDF7; --surface:#FFFFFF; --ink:#141414; --muted:#4A4A4A;
+    --line:#BDB6A6; --primary:#1D4ED8; --primary-dark:#163DA8; --primary-soft:#E6EEFF;
+    --go:#1B7A3A; --go-dark:#145C2B; --warn-bg:#FFF4D6; --warn-ink:#6B4A00;
+    --danger:#B42318; --today:#FFE58A; --past:#F1EEE6;
+    --radius:16px;
+    font-size:calc(20px * var(--scale));
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink)}
+  body{font-family:"Atkinson Hyperlegible",Verdana,Arial,sans-serif;line-height:1.45;-webkit-text-size-adjust:100%}
+  button,input,textarea,select{font:inherit;color:inherit}
+  button{cursor:pointer}
+  :focus-visible{outline:4px solid #F59E0B;outline-offset:3px}
+  .wrap{max-width:1100px;margin:0 auto;padding:16px 16px 120px}
+
+  /* ---------- Day-clock header ---------- */
+  .clock{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;
+    background:var(--surface);border:2px solid var(--line);border-radius:var(--radius);padding:16px 20px}
+  .clock .day{font-size:2rem;font-weight:700;line-height:1.15}
+  .clock .sub{font-size:1.2rem;color:var(--muted)}
+  .clock .part{font-weight:700;color:var(--ink)}
+  .size-btns{display:flex;gap:8px;align-items:center}
+  .size-btns span{font-size:.85rem;color:var(--muted);margin-right:4px}
+  .size-btns button{min-width:60px;min-height:60px;border-radius:12px;border:2px solid var(--line);background:#fff;font-weight:700}
+  .size-btns button[aria-pressed="true"]{background:var(--ink);color:#fff;border-color:var(--ink)}
+
+  /* ---------- Next appointment ---------- */
+  .next{margin-top:14px;display:flex;gap:14px;align-items:center;background:var(--primary-soft);
+    border:2px solid #9DB5F5;border-radius:var(--radius);padding:14px 18px}
+  .next .ico{font-size:2.2rem}
+  .next .lbl{font-size:.9rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--primary-dark)}
+  .next .what{font-size:1.25rem;font-weight:700}
+  .next .when{font-size:1.05rem}
+
+  /* ---------- Big add buttons ---------- */
+  .actions{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px}
+  .big{display:flex;align-items:center;justify-content:center;gap:12px;min-height:88px;border-radius:var(--radius);
+    border:none;font-size:1.35rem;font-weight:700;padding:12px 16px;text-align:center}
+  .big .i{font-size:1.9rem;line-height:1}
+  .big.speak{background:var(--primary);color:#fff}
+  .big.speak:hover{background:var(--primary-dark)}
+  .big.type{background:#fff;color:var(--primary-dark);border:3px solid var(--primary)}
+  .big.type:hover{background:var(--primary-soft)}
+
+  /* ---------- View switch + month nav ---------- */
+  .bar{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;margin:22px 0 12px}
+  .seg{display:inline-flex;border:2px solid var(--ink);border-radius:14px;overflow:hidden}
+  .seg button{min-height:60px;padding:0 22px;border:none;background:#fff;font-weight:700;font-size:1.05rem}
+  .seg button[aria-pressed="true"]{background:var(--ink);color:#fff}
+  .monthnav{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .monthnav h2{margin:0 6px;font-size:1.6rem;min-width:9ch;text-align:center}
+  .btn{min-height:60px;padding:0 18px;border-radius:12px;border:2px solid var(--line);background:#fff;font-weight:700}
+  .btn:hover{border-color:var(--ink)}
+
+  /* ---------- Month grid ---------- */
+  .grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px}
+  .dow{text-align:center;font-weight:700;font-size:.95rem;padding:6px 0;color:var(--muted)}
+  .cell{min-height:118px;background:#fff;border:2px solid var(--line);border-radius:12px;padding:6px 7px;text-align:left;
+    display:flex;flex-direction:column;gap:4px;overflow:hidden}
+  .cell:hover{border-color:var(--ink)}
+  .cell.out{visibility:hidden}
+  .cell.past{background:var(--past);color:#6b6b6b}
+  .cell.today{border:4px solid var(--ink);background:var(--today)}
+  .cell .num{font-size:1.25rem;font-weight:700;display:flex;justify-content:space-between;align-items:baseline;gap:4px}
+  .cell .tag{font-size:.7rem;background:var(--ink);color:#fff;border-radius:6px;padding:1px 6px}
+  .chip{font-size:.78rem;line-height:1.25;background:var(--primary-soft);border-left:5px solid var(--primary);border-radius:6px;padding:3px 5px;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .chip.medical{background:#E3F2FF;border-color:#0B63B6}
+  .chip.social{background:#EAF7EC;border-color:#1B7A3A}
+  .chip.errand{background:#FFF1E0;border-color:#B45309}
+  .more{font-size:.78rem;font-weight:700;color:var(--primary-dark)}
+  .count{display:none;font-size:.95rem;font-weight:700;background:var(--primary);color:#fff;border-radius:999px;
+    min-width:30px;height:30px;align-items:center;justify-content:center;margin-top:auto}
+
+  /* ---------- List view ---------- */
+  .day-group{margin-bottom:18px}
+  .day-group h3{margin:0 0 8px;font-size:1.2rem}
+  .day-group h3 .rel{display:inline-block;background:var(--ink);color:#fff;border-radius:8px;padding:0 10px;margin-right:8px;font-size:.95rem}
+  .appt{display:flex;align-items:center;gap:14px;background:#fff;border:2px solid var(--line);border-radius:14px;padding:12px 14px;margin-bottom:10px}
+  .appt .ico{font-size:2rem;width:2.4rem;text-align:center}
+  .appt .t{font-size:1.4rem;font-weight:700;min-width:5.5ch}
+  .appt .w{font-size:1.15rem;font-weight:700}
+  .appt .k{font-size:.9rem;color:var(--muted)}
+  .appt .grow{flex:1;min-width:0}
+  .appt .ops{display:flex;gap:8px;flex-wrap:wrap}
+  .appt .ops button{min-height:56px;min-width:90px;border-radius:10px;border:2px solid var(--line);background:#fff;font-weight:700}
+  .appt .ops .del{color:var(--danger);border-color:#E3A29C}
+  .empty{background:#fff;border:2px dashed var(--line);border-radius:var(--radius);padding:28px;text-align:center;font-size:1.15rem}
+
+  .sample-note{margin-top:14px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;
+    background:var(--warn-bg);color:var(--warn-ink);border-radius:12px;padding:10px 14px;font-size:.95rem}
+  .sample-note button{min-height:52px;border-radius:10px;border:2px solid var(--warn-ink);background:#fff;font-weight:700;padding:0 14px}
+
+  /* ---------- Dialog ---------- */
+  .overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:flex-start;justify-content:center;padding:24px 12px;overflow:auto;z-index:20}
+  .overlay.open{display:flex}
+  .sheet{background:var(--bg);width:100%;max-width:680px;border-radius:20px;padding:22px;box-shadow:0 12px 40px rgba(0,0,0,.3)}
+  .sheet-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px}
+  .sheet-head h2{margin:0;font-size:1.6rem}
+  .close{min-height:56px;padding:0 16px;border-radius:12px;border:2px solid var(--line);background:#fff;font-weight:700}
+  .hint{background:#fff;border:2px solid var(--line);border-radius:12px;padding:12px 14px;font-size:1rem;color:var(--muted)}
+  .hint b{color:var(--ink)}
+  textarea{width:100%;min-height:150px;border:3px solid var(--ink);border-radius:14px;padding:14px;font-size:1.25rem;background:#fff;resize:vertical}
+  .row{display:flex;gap:12px;flex-wrap:wrap;margin-top:14px}
+  .row > *{flex:1 1 200px}
+  .primary{min-height:72px;border:none;border-radius:14px;background:var(--go);color:#fff;font-weight:700;font-size:1.3rem}
+  .primary:hover{background:var(--go-dark)}
+  .secondary{min-height:72px;border-radius:14px;border:3px solid var(--ink);background:#fff;font-weight:700;font-size:1.15rem}
+  .linkish{background:none;border:none;color:var(--primary-dark);text-decoration:underline;font-weight:700;padding:12px 0;min-height:48px}
+
+  .mic{display:flex;flex-direction:column;align-items:center;gap:14px;padding:12px 0}
+  .mic .dot{width:150px;height:150px;border-radius:50%;background:var(--danger);color:#fff;display:flex;align-items:center;justify-content:center;font-size:4rem;
+    animation:pulse 1.4s ease-in-out infinite}
+  @keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(180,35,24,.45)}50%{box-shadow:0 0 0 26px rgba(180,35,24,0)}}
+  @media (prefers-reduced-motion:reduce){.mic .dot{animation:none}}
+  .mic .state{font-size:1.5rem;font-weight:700}
+  .heard{width:100%;min-height:80px;background:#fff;border:2px solid var(--line);border-radius:12px;padding:12px;font-size:1.25rem}
+  .notice{background:var(--warn-bg);color:var(--warn-ink);border-radius:12px;padding:12px 14px;font-weight:700;margin-bottom:12px}
+
+  .confirm{background:#fff;border:3px solid var(--ink);border-radius:16px;padding:18px}
+  .confirm .top{display:flex;gap:14px;align-items:center}
+  .confirm .ico{font-size:2.8rem}
+  .confirm .what{font-size:1.6rem;font-weight:700;line-height:1.2}
+  .confirm .cat{font-size:.9rem;color:var(--muted)}
+  .confirm dl{margin:14px 0 0;display:grid;grid-template-columns:auto 1fr;gap:8px 14px;font-size:1.3rem}
+  .confirm dt{color:var(--muted)}
+  .confirm dd{margin:0;font-weight:700}
+  .question{margin-top:14px;background:var(--warn-bg);border-radius:14px;padding:14px}
+  .question p{margin:0 0 10px;font-weight:700;color:var(--warn-ink);font-size:1.15rem}
+  .choices{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px}
+  .choices button{min-height:64px;border-radius:12px;border:3px solid var(--ink);background:#fff;font-weight:700;font-size:1.05rem}
+  .choices button[aria-pressed="true"]{background:var(--ink);color:#fff}
+
+  label.f{display:block;font-weight:700;margin:14px 0 6px;font-size:1.1rem}
+  input.f{width:100%;min-height:64px;border:3px solid var(--ink);border-radius:12px;padding:0 14px;font-size:1.25rem;background:#fff}
+
+  .toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--ink);color:#fff;border-radius:16px;
+    padding:14px 18px;display:none;align-items:center;gap:16px;z-index:30;max-width:calc(100% - 24px);font-size:1.05rem;box-shadow:0 8px 24px rgba(0,0,0,.3)}
+  .toast.show{display:flex}
+  .toast button{min-height:52px;padding:0 16px;border-radius:10px;border:2px solid #fff;background:transparent;color:#fff;font-weight:700}
+
+  .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+
+  @media (max-width:720px){
+    :root{font-size:calc(18px * var(--scale))}
+    .clock .day{font-size:1.6rem}
+    .cell{min-height:72px;padding:4px;align-items:center}
+    .cell .num{font-size:1.1rem;justify-content:center}
+    .cell .tag,.chip,.more{display:none}
+    .count{display:flex}
+    .dow{font-size:.8rem}
+    .appt{flex-wrap:wrap}
+    .appt .ops{width:100%}
+    .appt .ops button{flex:1}
+    .monthnav h2{font-size:1.3rem;width:100%;order:-1;text-align:left;margin:0}
+  }
+  @media (max-width:420px){ .actions{grid-template-columns:1fr} }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="clock" aria-label="Today">
+    <div>
+      <div class="day" id="clockDay">—</div>
+      <div class="sub"><span class="part" id="clockPart">—</span> · <span id="clockTime">—</span></div>
+    </div>
+    <div class="size-btns" role="group" aria-label="Text size">
+      <span>Text size</span>
+      <button data-scale="1" aria-label="Normal text">A</button>
+      <button data-scale="1.2" aria-label="Large text" style="font-size:1.2em">A</button>
+      <button data-scale="1.4" aria-label="Largest text" style="font-size:1.4em">A</button>
+    </div>
+  </header>
+
+  <section id="next" aria-live="polite"></section>
+
+  <div class="actions">
+    <button class="big speak" id="speakBtn"><span class="i" aria-hidden="true">🎤</span> Say an appointment</button>
+    <button class="big type" id="typeBtn"><span class="i" aria-hidden="true">⌨️</span> Type an appointment</button>
+  </div>
+
+  <div id="sampleNote"></div>
+
+  <div class="bar">
+    <div class="seg" role="group" aria-label="How to show the calendar">
+      <button id="viewMonth" aria-pressed="true">Month</button>
+      <button id="viewList" aria-pressed="false">List</button>
+    </div>
+    <div class="monthnav" id="monthNav">
+      <button class="btn" id="prevM">◀ <span id="prevLabel"></span></button>
+      <h2 id="monthTitle"></h2>
+      <button class="btn" id="nextM"><span id="nextLabel"></span> ▶</button>
+      <button class="btn" id="todayBtn">Today</button>
+    </div>
+  </div>
+
+  <main id="main"></main>
+</div>
+
+<div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
+  <div class="sheet" id="sheet"></div>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"><span id="toastMsg"></span><button id="toastUndo">Undo</button></div>
+<div class="sr" aria-live="assertive" id="srLive"></div>
+
+<script>
+/* =========================================================
+   Easy Calendar v1 — single-file prototype
+   ========================================================= */
+const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+const WEEKDAYS = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+const pad = n => String(n).padStart(2,'0');
+const ymd = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+const fromYmd = s => { const [y,m,d] = s.split('-').map(Number); return new Date(y, m-1, d); };
+const addDays = (d,n) => { const x = new Date(d.getFullYear(), d.getMonth(), d.getDate()); x.setDate(x.getDate()+n); return x; };
+const startOfDay = d => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+const daysBetween = (a,b) => Math.round((startOfDay(b)-startOfDay(a))/86400000);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+function fmtDate(s){ const d = fromYmd(s); return `${WEEKDAYS[d.getDay()]}, ${MONTHS[d.getMonth()]} ${d.getDate()}`; }
+function fmtDateYear(s){ const d = fromYmd(s); const y = d.getFullYear() !== new Date().getFullYear() ? `, ${d.getFullYear()}` : ''; return fmtDate(s)+y; }
+function fmtTime(t){ if(!t) return 'Any time'; let [h,m] = t.split(':').map(Number); const ap = h>=12?'PM':'AM'; h = h%12||12; return `${h}:${pad(m)} ${ap}`; }
+function fmtTimeSpoken(t){ if(!t) return 'no set time'; let [h,m]=t.split(':').map(Number); const ap=h>=12?'P M':'A M'; h=h%12||12; return m? `${h} ${pad(m)} ${ap}` : `${h} ${ap}`; }
+function relDay(s){ const n = daysBetween(new Date(), fromYmd(s)); if(n===0) return 'Today'; if(n===1) return 'Tomorrow'; if(n===-1) return 'Yesterday'; if(n>1 && n<7) return `In ${n} days`; if(n>=7) return `In ${n} days`; return ''; }
+
+/* ---------- Categories (icon + word, never colour alone) ---------- */
+const CATS = [
+  {key:'medical', icon:'🦷', label:'Dentist', re:/\b(dentist|dental|teeth|hygienist|denture\w*)\b/},
+  {key:'medical', icon:'👓', label:'Eyes', re:/\b(eye|eyes|optometrist|ophthalmolog\w*|glasses|optician)\b/},
+  {key:'medical', icon:'💊', label:'Pharmacy', re:/\b(pharmacy|pharmacist|prescription|refill|pills|medication|medicine)\b/},
+  {key:'medical', icon:'🩺', label:'Health', re:/\b(doctor|dr|physician|gp|clinic|hospital|specialist|cardiolog\w*|nurse|blood ?(test|work)|lab|x-?ray|ultrasound|mri|scan|physio\w*|therap\w*|check-?up|surgeon|vaccin\w*|flu shot|shot|medical)\b/},
+  {key:'errand',  icon:'✂️', label:'Hair', re:/\b(hair|haircut|barber|salon)\b/},
+  {key:'errand',  icon:'🏦', label:'Errand', re:/\b(bank|lawyer|accountant|tax|post office|groceries|grocery|shopping)\b/},
+  {key:'social',  icon:'🎂', label:'Birthday', re:/\b(birthday|anniversary)\b/},
+  {key:'social',  icon:'👪', label:'Family & friends', re:/\b(lunch|dinner|breakfast|coffee|tea|visit|family|grandson|granddaughter|grandkids|grandchildren|son|daughter|friend\w*|club|bingo|church|temple|mosque|synagogue|card game)\b/},
+];
+function categorize(text){ const t = text.toLowerCase(); for(const c of CATS){ if(c.re.test(t)) return c; } return {key:'other', icon:'📅', label:'Appointment'}; }
+
+/* =========================================================
+   Natural-language parser  ("I have an appointment with my
+   family doctor at 6:30 a.m. on Wednesday, November 10th")
+   ========================================================= */
+const MONTH_RE = '(january|jan|february|feb|march|mar|april|apr|may|june|jun|july|jul|august|aug|september|sept|sep|october|oct|november|nov|december|dec)';
+const MONTH_IDX = {jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11};
+const monthIndex = w => MONTH_IDX[w.slice(0,3)];
+const WD_RE = '(sunday|monday|tuesday|wednesday|thursday|friday|saturday)';
+const ORD = ['','first','second','third','fourth','fifth','sixth','seventh','eighth','ninth','tenth','eleventh','twelfth','thirteenth','fourteenth','fifteenth','sixteenth','seventeenth','eighteenth','nineteenth','twentieth'];
+const NUMW = {one:1,two:2,three:3,four:4,five:5,six:6,seven:7,eight:8,nine:9,ten:10,eleven:11,twelve:12};
+
+function normalize(text){
+  let s = ' ' + text.toLowerCase().replace(/[,!?;]/g,' ').replace(/[’]/g,"'") + ' ';
+  // ordinal words -> digits  (twenty first, thirtieth, tenth ...)
+  s = s.replace(/\bthirty[\s-]first\b/g,'31st').replace(/\bthirtieth\b/g,'30th');
+  for(let i=9;i>=1;i--) s = s.replace(new RegExp(`\\btwenty[\\s-]${ORD[i]}\\b`,'g'), `${20+i}th`);
+  for(let i=20;i>=1;i--) s = s.replace(new RegExp(`\\b${ORD[i]}\\b`,'g'), `${i}th`);
+  // a.m. / p.m. variants
+  s = s.replace(/(\d)\s*([ap])\.?\s?m\.?(?=[\s.]|$)/g, '$1 $2m ');
+  // spoken hour words before am/pm/o'clock/thirty etc.
+  s = s.replace(/\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b(?=\s+(?:([ap])\.?\s?m\b|o'?clock|thirty|fifteen|forty[\s-]five|forty|twenty|ten\b|in the))/g, (m,w)=>NUMW[w]);
+  s = s.replace(/\b(\d{1,2})\s+(thirty|fifteen|forty[\s-]five|forty|twenty|ten)\b/g, (m,h,w)=>{
+    const mm = {thirty:30,fifteen:15,forty:40,'forty five':45,'forty-five':45,twenty:20,ten:10}[w.replace(/\s+/,' ')];
+    return `${h}:${pad(mm)}`; });
+  s = s.replace(/\b([ap])\.?\s?m\b\.?/g, (m,a)=>`${a}m`);
+  s = s.replace(/(\d{1,2}:\d{2}|\d{1,2})\s*(am|pm)\b/g, '$1 $2');
+  s = s.replace(/\s+/g,' ');
+  return s;
+}
+
+function parseAppointment(text, now = new Date()){
+  const today = startOfDay(now);
+  let s = normalize(text);
+  let rest = s;
+  const cut = (m) => { rest = rest.replace(m, ' '); };
+  const res = {raw:text, title:'', date:null, time:null, timeGuessed:false, conflict:null, dateGuessed:false};
+
+  /* ----- DATE ----- */
+  let saidWeekday = null, m;
+  const wdm = rest.match(new RegExp(`\\b(?:on\\s+)?(?:(next|this|coming)\\s+)?${WD_RE}\\b`));
+  if(wdm){ saidWeekday = {idx: WEEKDAYS.map(w=>w.toLowerCase()).indexOf(wdm[2]), mod: wdm[1]||null}; cut(wdm[0]); }
+
+  const yearFix = (mo, d, y) => {
+    let dt = new Date(y ?? today.getFullYear(), mo, d);
+    if(!y && dt < today) dt = new Date(today.getFullYear()+1, mo, d);
+    return dt;
+  };
+  let explicit = null;
+  if((m = rest.match(/\b(\d{4})-(\d{2})-(\d{2})\b/))){ explicit = new Date(+m[1], +m[2]-1, +m[3]); cut(m[0]); }
+  else if((m = rest.match(new RegExp(`\\b(?:on\\s+)?(?:the\\s+)?${MONTH_RE}\\.?\\s+(?:the\\s+)?(\\d{1,2})(?:st|nd|rd|th)?\\b(?:\\s+(\\d{4}))?`)))){
+    explicit = yearFix(monthIndex(m[1]), +m[2], m[3]?+m[3]:null); cut(m[0]); }
+  else if((m = rest.match(new RegExp(`\\b(?:on\\s+)?(?:the\\s+)?(\\d{1,2})(?:st|nd|rd|th)?\\s+(?:of\\s+)?${MONTH_RE}\\b(?:\\s+(\\d{4}))?`)))){
+    explicit = yearFix(monthIndex(m[2]), +m[1], m[3]?+m[3]:null); cut(m[0]); }
+  else if((m = rest.match(/\b(?:on\s+)?the\s+(\d{1,2})(?:st|nd|rd|th)\b/))){
+    let dt = new Date(today.getFullYear(), today.getMonth(), +m[1]);
+    if(dt < today) dt = new Date(today.getFullYear(), today.getMonth()+1, +m[1]);
+    explicit = dt; cut(m[0]); }
+  else if((m = rest.match(/\b(?:the\s+)?day after tomorrow\b/))){ explicit = addDays(today,2); cut(m[0]); }
+  else if((m = rest.match(/\btomorrow\b/))){ explicit = addDays(today,1); cut(m[0]); }
+  else if((m = rest.match(/\b(today|tonight|this (?:morning|afternoon|evening))\b/))){ explicit = today; if(m[1]==='today') cut(m[0]); }
+  else if((m = rest.match(/\bin\s+(\d{1,2}|a|one|two|three)\s+(day|days|week|weeks)\b/))){
+    const n = {a:1,one:1,two:2,three:3}[m[1]] ?? +m[1];
+    explicit = addDays(today, m[2].startsWith('week') ? n*7 : n); cut(m[0]); }
+
+  if(explicit){
+    res.date = ymd(explicit);
+    if(saidWeekday && explicit.getDay() !== saidWeekday.idx){
+      // find the nearest date with the weekday they said (±3 days)
+      let diff = saidWeekday.idx - explicit.getDay(); if(diff>3) diff-=7; if(diff<-3) diff+=7;
+      res.conflict = {saidWeekday: WEEKDAYS[saidWeekday.idx], actual: res.date, alternative: ymd(addDays(explicit,diff))};
+    }
+  } else if(saidWeekday){
+    let diff = (saidWeekday.idx - today.getDay() + 7) % 7;
+    if(diff===0 && saidWeekday.mod) diff = 7;
+    if(saidWeekday.mod==='next' && diff<7) { /* "next Friday" = the coming one; confirm screen shows full date */ }
+    res.date = ymd(addDays(today, diff));
+  }
+
+  /* ----- TIME ----- */
+  let daypart = null;
+  if(/\b(in the morning|this morning)\b/.test(rest)) daypart='am';
+  if(/\b(in the afternoon|this afternoon|in the evening|this evening|tonight|at night)\b/.test(rest)) daypart='pm';
+  rest = rest.replace(/\b(in the morning|this morning|in the afternoon|this afternoon|in the evening|this evening|tonight|at night)\b/g,' ');
+
+  const setT = (h,mi)=>{ res.time = `${pad(h)}:${pad(mi)}`; };
+  if((m = rest.match(/\b(?:at\s+)?(noon|midday|lunchtime|lunch time)\b/)) && !/\blunch\b/.test(m[1])){ setT(12,0); cut(m[0]); }
+  else if((m = rest.match(/\b(?:at\s+)?(noon|midday)\b/))){ setT(12,0); cut(m[0]); }
+  else if((m = rest.match(/\b(?:at\s+)?midnight\b/))){ setT(0,0); cut(m[0]); }
+  if(!res.time && (m = rest.match(/\b(?:at\s+|by\s+|for\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/))){
+    let h = +m[1] % 12; if(m[3]==='pm') h += 12; setT(h, +(m[2]||0)); cut(m[0]); }
+  if(!res.time && (m = rest.match(/\b(?:at\s+)?(half past|quarter past|quarter to)\s+(\d{1,2})\b/))){
+    let h = +m[2], mi = m[1]==='half past'?30: m[1]==='quarter past'?15:45; if(m[1]==='quarter to') h = h-1||12;
+    res._h = h; res._m = mi; cut(m[0]); }
+  if(!res.time && res._h===undefined && (m = rest.match(/\b(?:at\s+)?(\d{1,2}):(\d{2})\b/))){ res._h=+m[1]; res._m=+m[2]; cut(m[0]); }
+  if(!res.time && res._h===undefined && (m = rest.match(/\bat\s+(\d{1,2})(?:\s*o'?clock)?\b/))){ res._h=+m[1]; res._m=0; cut(m[0]); }
+  if(!res.time && res._h===undefined && (m = rest.match(/\b(\d{1,2})\s*o'?clock\b/))){ res._h=+m[1]; res._m=0; cut(m[0]); }
+  if(res._h!==undefined){
+    let h = res._h % 12;
+    if(daypart==='pm') h += 12;
+    else if(daypart!=='am'){ if(res._h>=1 && res._h<=6 || res._h===12) h = res._h===12?12:h+12; res.timeGuessed = res._h<=12; }
+    if(res._h>12) h = res._h; // 24-hour clock
+    setT(h, res._m); delete res._h; delete res._m;
+  }
+
+  /* ----- TITLE ----- */
+  let t = rest.replace(/\b(please|okay|ok|hey|um|uh|so)\b/g,' ')
+              .replace(/\b(on|to|in|into)\s+my\s+calendar\b/g,' ')
+              .replace(/\s+/g,' ').trim();
+  const leadIns = [
+    /^(?:i|we)\s+(?:have|has|had|got|'ve got|have got|need|want|will have)\s+(?:to\s+)?/,
+    /^i've got\s+/, /^there(?:'s| is| will be)\s+/,
+    /^remind me\s+(?:that|about|of|to)?\s*/, /^(?:please\s+)?(?:add|schedule|book|put|make|set up|create|new)\s+/,
+    /^(?:go|going)\s+(?:to\s+)?/, /^(?:see|visit)\s+/, /^(?:an?|my|the)\s+/,
+    /^(?:appointment|appt|meeting|visit|booking)\s+(?:with|at|for|to see)\s+/, /^(?:with|at|for|to see)\s+/, /^(?:an?|my|the)\s+/
+  ];
+  for(let pass=0; pass<3; pass++) for(const re of leadIns) t = t.replace(re,'');
+  for(let pass=0; pass<4; pass++) t = t.replace(/\s+(on|at|for|in|the|and|from|by|of|with)$/,'').replace(/^(on|at|for|and|the)\s+/,'');
+  t = t.replace(/\s+/g,' ').trim();
+  if(!t || /^(appointment|appt|an appointment|meeting)$/.test(t)) t = 'Appointment';
+  // keep the person's own capitals (e.g. "Mary") when the words appear unchanged in what they said
+  const orig = text.replace(/[,!?;]/g,' ').replace(/\s+/g,' ');
+  const at = orig.toLowerCase().indexOf(t.toLowerCase());
+  if(at >= 0 && t !== 'Appointment') t = orig.slice(at, at + t.length);
+  res.title = t.charAt(0).toUpperCase() + t.slice(1);
+  res.cat = categorize(text);
+  return res;
+}
+window.parseAppointment = parseAppointment;
+
+/* =========================================================
+   Storage (this browser only, for the prototype)
+   ========================================================= */
+const KEY = 'easycal.v1';
+let state = { appts: [], scale: 1, view: 'month', seeded: false };
+function load(){ try{ const raw = localStorage.getItem(KEY); if(raw) state = Object.assign(state, JSON.parse(raw)); }catch(e){} }
+function save(){ try{ localStorage.setItem(KEY, JSON.stringify(state)); }catch(e){} }
+function seedIfNew(){
+  if(state.seeded) return;
+  const t = new Date();
+  const mk = (title, d, time, text) => ({id: uid(), title, date: ymd(addDays(t,d)), time, catKey: categorize(text||title), sample:true});
+  state.appts = [
+    mk('Pick up prescription', 0, '16:00', 'pharmacy'),
+    mk('Blood test', 3, '08:00'),
+    mk('Lunch with the family', 6, '12:30', 'lunch family'),
+    mk('Dentist cleaning', 12, '10:15', 'dentist'),
+  ].map(a => ({...a, cat: a.catKey})).map(({catKey, ...a}) => a);
+  state.seeded = true; save();
+}
+const uid = () => Math.random().toString(36).slice(2,10);
+const sortAppts = a => a.slice().sort((x,y)=> (x.date+(x.time||'99')).localeCompare(y.date+(y.time||'99')));
+
+/* =========================================================
+   Header clock (day-clock idea: "Friday · Afternoon")
+   ========================================================= */
+function partOfDay(h){ return h<5?'Night': h<12?'Morning': h<17?'Afternoon': h<21?'Evening':'Night'; }
+function tickClock(){
+  const n = new Date();
+  document.getElementById('clockDay').textContent = `${WEEKDAYS[n.getDay()]}, ${MONTHS[n.getMonth()]} ${n.getDate()}, ${n.getFullYear()}`;
+  document.getElementById('clockPart').textContent = `It is ${partOfDay(n.getHours())}`;
+  document.getElementById('clockTime').textContent = fmtTime(`${n.getHours()}:${n.getMinutes()}`);
+}
+
+/* =========================================================
+   Rendering
+   ========================================================= */
+let cursor = new Date(); cursor.setDate(1);
+
+function renderNext(){
+  const now = new Date();
+  const nowKey = ymd(now) + `${pad(now.getHours())}:${pad(now.getMinutes())}`;
+  const up = sortAppts(state.appts).find(a => (a.date + (a.time||'23:59')) >= nowKey);
+  const el = document.getElementById('next');
+  if(!up){ el.innerHTML = `<div class="next"><span class="ico" aria-hidden="true">✅</span><div><div class="lbl">Coming up</div><div class="what">Nothing scheduled</div></div></div>`; return; }
+  const rel = relDay(up.date);
+  el.innerHTML = `<div class="next"><span class="ico" aria-hidden="true">${up.cat.icon}</span><div>
+    <div class="lbl">Next appointment</div>
+    <div class="what">${esc(up.title)}</div>
+    <div class="when"><b>${rel ? rel + ' · ' : ''}</b>${fmtDate(up.date)} at ${fmtTime(up.time)}</div></div></div>`;
+}
+
+function renderSampleNote(){
+  const el = document.getElementById('sampleNote');
+  const n = state.appts.filter(a=>a.sample).length;
+  el.innerHTML = n ? `<div class="sample-note"><span>Showing ${n} sample appointments so you can see how it looks.</span><button id="clearSamples">Remove samples</button></div>` : '';
+  if(n) document.getElementById('clearSamples').onclick = () => { state.appts = state.appts.filter(a=>!a.sample); save(); renderAll(); say('Sample appointments removed.'); };
+}
+
+function renderMonth(){
+  const y = cursor.getFullYear(), mo = cursor.getMonth();
+  document.getElementById('monthTitle').textContent = `${MONTHS[mo]} ${y}`;
+  document.getElementById('prevLabel').textContent = MONTHS[(mo+11)%12];
+  document.getElementById('nextLabel').textContent = MONTHS[(mo+1)%12];
+  const first = new Date(y, mo, 1), days = new Date(y, mo+1, 0).getDate();
+  const todayKey = ymd(new Date());
+  const byDate = {};
+  for(const a of sortAppts(state.appts)) (byDate[a.date] ||= []).push(a);
+  let html = `<div class="grid" role="grid" aria-label="${MONTHS[mo]} ${y}">`;
+  for(const w of WEEKDAYS) html += `<div class="dow" role="columnheader"><span aria-hidden="true">${w.slice(0,3)}</span><span class="sr">${w}</span></div>`;
+  for(let i=0;i<first.getDay();i++) html += `<div class="cell out" aria-hidden="true"></div>`;
+  for(let d=1; d<=days; d++){
+    const key = `${y}-${pad(mo+1)}-${pad(d)}`, list = byDate[key]||[];
+    const cls = key===todayKey ? 'today' : key<todayKey ? 'past' : '';
+    const label = `${fmtDate(key)}. ${list.length ? list.length + (list.length>1?' appointments':' appointment') : 'No appointments'}`;
+    html += `<button class="cell ${cls}" data-date="${key}" aria-label="${esc(label)}">
+      <span class="num">${d}${key===todayKey?'<span class="tag">Today</span>':''}</span>
+      ${list.slice(0,2).map(a=>`<span class="chip ${a.cat.key}">${a.cat.icon} ${a.time?fmtTime(a.time).replace(':00','').replace(' ',''):''} ${esc(a.title)}</span>`).join('')}
+      ${list.length>2?`<span class="more">+${list.length-2} more</span>`:''}
+      ${list.length?`<span class="count" aria-hidden="true">${list.length}</span>`:''}
+    </button>`;
+  }
+  html += `</div>`;
+  const main = document.getElementById('main'); main.innerHTML = html;
+  main.querySelectorAll('.cell[data-date]').forEach(b => b.onclick = () => openDay(b.dataset.date));
+}
+
+function apptRow(a){
+  return `<div class="appt"><span class="ico" aria-hidden="true">${a.cat.icon}</span>
+    <span class="t">${fmtTime(a.time)}</span>
+    <div class="grow"><div class="w">${esc(a.title)}</div><div class="k">${a.cat.label}${a.place?' · '+esc(a.place):''}</div></div>
+    <div class="ops"><button data-edit="${a.id}">Change</button><button class="del" data-del="${a.id}">Delete</button></div></div>`;
+}
+function wireRowOps(root){
+  root.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => openForm(state.appts.find(a=>a.id===b.dataset.edit)));
+  root.querySelectorAll('[data-del]').forEach(b => b.onclick = () => confirmDelete(b.dataset.del));
+}
+
+function renderList(){
+  const todayKey = ymd(new Date());
+  const up = sortAppts(state.appts).filter(a => a.date >= todayKey);
+  const main = document.getElementById('main');
+  if(!up.length){ main.innerHTML = `<div class="empty">No upcoming appointments.<br>Tap <b>Say an appointment</b> or <b>Type an appointment</b> to add one.</div>`; return; }
+  const groups = {}; for(const a of up) (groups[a.date] ||= []).push(a);
+  main.innerHTML = Object.entries(groups).map(([d,list]) => {
+    const rel = relDay(d);
+    return `<section class="day-group"><h3>${rel?`<span class="rel">${rel}</span>`:''}${fmtDateYear(d)}</h3>${list.map(apptRow).join('')}</section>`;
+  }).join('');
+  wireRowOps(main);
+}
+
+function renderAll(){
+  renderNext(); renderSampleNote();
+  document.getElementById('viewMonth').setAttribute('aria-pressed', state.view==='month');
+  document.getElementById('viewList').setAttribute('aria-pressed', state.view==='list');
+  document.getElementById('monthNav').style.display = state.view==='month' ? '' : 'none';
+  state.view==='month' ? renderMonth() : renderList();
+  document.querySelectorAll('.size-btns button').forEach(b => b.setAttribute('aria-pressed', +b.dataset.scale === +state.scale));
+  document.documentElement.style.setProperty('--scale', state.scale);
+}
+
+/* =========================================================
+   Dialogs
+   ========================================================= */
+const overlay = document.getElementById('overlay'), sheet = document.getElementById('sheet');
+let lastFocus = null;
+function openSheet(html){
+  lastFocus = document.activeElement;
+  sheet.innerHTML = html; overlay.classList.add('open');
+  sheet.querySelectorAll('[data-close]').forEach(b => b.onclick = closeSheet);
+  const f = sheet.querySelector('[autofocus]') || sheet.querySelector('button, textarea, input');
+  setTimeout(()=> f && f.focus(), 30);
+}
+function closeSheet(){ stopListening(); stopSpeaking(); overlay.classList.remove('open'); sheet.innerHTML=''; lastFocus && lastFocus.focus && lastFocus.focus(); }
+overlay.addEventListener('click', e => { if(e.target===overlay) closeSheet(); });
+document.addEventListener('keydown', e => { if(e.key==='Escape' && overlay.classList.contains('open')) closeSheet(); });
+const head = title => `<div class="sheet-head"><h2 id="sheetTitle">${title}</h2><button class="close" data-close>✕ Close</button></div>`;
+
+/* ---------- Day view ---------- */
+function openDay(date){
+  const list = sortAppts(state.appts).filter(a=>a.date===date);
+  const rel = relDay(date);
+  openSheet(`${head(fmtDateYear(date))}
+    ${rel?`<p style="margin:-4px 0 12px;font-weight:700">${rel}</p>`:''}
+    ${list.length ? list.map(apptRow).join('') : `<div class="empty">Nothing on this day.</div>`}
+    <div class="row">
+      <button class="primary" id="addHere">＋ Add on this day</button>
+      ${list.length?`<button class="secondary" id="readDay">🔊 Read this day aloud</button>`:''}
+    </div>`);
+  wireRowOps(sheet);
+  sheet.querySelector('#addHere').onclick = () => openForm({date});
+  const rd = sheet.querySelector('#readDay');
+  if(rd) rd.onclick = () => speak(`${fmtDate(date)}. ` + list.map(a=>`At ${fmtTimeSpoken(a.time)}, ${a.title}.`).join(' '));
+}
+
+/* ---------- Type ---------- */
+function openType(prefill=''){
+  openSheet(`${head('Type your appointment')}
+    <div class="hint">Write it the way you would say it. For example:<br>
+      <b>“Family doctor at 6:30 a.m. on Tuesday, November 10”</b><br>
+      <b>“Haircut tomorrow at 2 pm”</b> · <b>“Lunch with Mary next Friday at noon”</b></div>
+    <label for="nl" class="sr">Appointment</label>
+    <textarea id="nl" autofocus placeholder="Type here…">${esc(prefill)}</textarea>
+    <div class="row"><button class="primary" id="nlGo">Next ➜</button></div>
+    <button class="linkish" id="toForm">I'd rather fill in a simple form</button>`);
+  const go = () => { const v = sheet.querySelector('#nl').value.trim(); if(!v){ sheet.querySelector('#nl').focus(); return; } showConfirm(parseAppointment(v)); };
+  sheet.querySelector('#nlGo').onclick = go;
+  sheet.querySelector('#nl').addEventListener('keydown', e => { if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); go(); } });
+  sheet.querySelector('#toForm').onclick = () => openForm({});
+}
+
+/* ---------- Speak ---------- */
+let rec = null;
+function stopListening(){ try{ rec && rec.abort(); }catch(e){} rec = null; }
+function openSpeak(){
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if(!SR){ return openTypeWithNotice('Voice is not available in this browser. Please type it instead — or open the app in Chrome, Edge or Safari to use voice.'); }
+  openSheet(`${head('Say your appointment')}
+    <div class="mic"><div class="dot" aria-hidden="true">🎤</div><div class="state" id="micState">Listening… go ahead</div>
+      <div class="hint" style="width:100%">Say something like: <b>“I have an appointment with my family doctor at 6:30 a.m. on Tuesday, November 10th.”</b></div>
+      <div class="heard" id="heard" aria-live="polite"></div></div>
+    <div class="row"><button class="primary" id="doneTalk">I'm done talking</button><button class="secondary" id="typeInstead">Type instead</button></div>`);
+  let finalText = '', interim = '', handled = false;
+  const heard = sheet.querySelector('#heard');
+  const finish = () => { if(handled) return; handled = true; const t = (finalText + ' ' + interim).trim(); stopListening();
+    if(!t) return openTypeWithNotice("I didn't hear anything. You can try again, or type it here."); showConfirm(parseAppointment(t)); };
+  sheet.querySelector('#doneTalk').onclick = finish;
+  sheet.querySelector('#typeInstead').onclick = () => { handled = true; stopListening(); openType((finalText+' '+interim).trim()); };
+  try{
+    rec = new SR(); rec.lang = 'en-CA'; rec.interimResults = true; rec.continuous = false; rec.maxAlternatives = 1;
+    rec.onresult = e => { interim = ''; for(let i=e.resultIndex;i<e.results.length;i++){ const r = e.results[i]; if(r.isFinal) finalText += r[0].transcript + ' '; else interim += r[0].transcript; } heard.textContent = (finalText + interim).trim(); };
+    rec.onerror = e => { if(handled) return; handled = true; rec = null;
+      const msg = (e.error==='not-allowed'||e.error==='service-not-allowed') ? 'The microphone is turned off for this page. Please type it instead.' :
+                  e.error==='no-speech' ? "I didn't hear anything. Please type it, or close and tap the microphone again." : 'Voice stopped working. Please type it instead.';
+      openTypeWithNotice(msg, (finalText+' '+interim).trim()); };
+    rec.onend = () => { if(!handled && (finalText||interim)) finish(); };
+    rec.start();
+  }catch(err){ handled = true; openTypeWithNotice('Voice could not start here. Please type it instead.'); }
+}
+function openTypeWithNotice(msg, prefill=''){ openType(prefill); sheet.querySelector('.sheet-head').insertAdjacentHTML('afterend', `<div class="notice" role="alert">${esc(msg)}</div>`); }
+
+/* ---------- Confirm (read back + resolve questions) ---------- */
+function showConfirm(p, draft){
+  const d = draft || {title:p.title, date:p.date, time:p.time, cat:p.cat, place:'', id:null};
+  const qs = [];
+  if(p && p.conflict && !d._resolvedConflict){
+    qs.push(`<div class="question"><p>⚠️ ${fmtDate(p.conflict.actual).split(',')[1].trim()} is a ${fmtDate(p.conflict.actual).split(',')[0]}, not a ${p.conflict.saidWeekday}. Which did you mean?</p>
+      <div class="choices"><button data-pick="${p.conflict.actual}">${fmtDate(p.conflict.actual)}</button><button data-pick="${p.conflict.alternative}">${fmtDate(p.conflict.alternative)}</button></div></div>`);
+  }
+  if(!d.date){
+    const t = new Date();
+    qs.push(`<div class="question"><p>Which day?</p><div class="choices">
+      <button data-pick="${ymd(t)}">Today</button><button data-pick="${ymd(addDays(t,1))}">Tomorrow</button>
+      <button data-pick="__other">Another day…</button></div></div>`);
+  }
+  if(!d.time && !d._anyTime){
+    qs.push(`<div class="question"><p>What time?</p><div class="choices">
+      <button data-time="09:00">9:00 AM</button><button data-time="10:00">10:00 AM</button><button data-time="13:00">1:00 PM</button>
+      <button data-time="15:00">3:00 PM</button><button data-time="__other">Another time…</button><button data-time="__none">No set time</button></div></div>`);
+  } else if(p && p.timeGuessed && !d._timeOk){
+    const [h,mi] = d.time.split(':').map(Number); const flip = `${pad((h+12)%24)}:${pad(mi)}`;
+    qs.push(`<div class="question"><p>Is that in the morning or afternoon?</p><div class="choices">
+      <button data-ampm="${h<12?d.time:flip}">${fmtTime(h<12?d.time:flip)} (morning)</button>
+      <button data-ampm="${h>=12?d.time:flip}">${fmtTime(h>=12?d.time:flip)} (afternoon/evening)</button></div></div>`);
+  }
+  const ready = !qs.length;
+  openSheet(`${head(ready ? 'Is this right?' : 'Just a quick question')}
+    ${p && p.raw ? `<p style="margin:0 0 10px;color:var(--muted)">You said: “${esc(p.raw)}”</p>` : ''}
+    <div class="confirm"><div class="top"><span class="ico" aria-hidden="true">${d.cat.icon}</span>
+      <div><div class="what">${esc(d.title)}</div><div class="cat">${d.cat.label}</div></div></div>
+      <dl><dt>Day</dt><dd>${d.date ? fmtDateYear(d.date) + (relDay(d.date)?` <span style="font-weight:400">(${relDay(d.date)})</span>`:'') : '—'}</dd>
+          <dt>Time</dt><dd>${d.time ? fmtTime(d.time) : (d._anyTime ? 'Any time' : '—')}</dd></dl></div>
+    ${qs.join('')}
+    <div class="row">
+      ${ready ? `<button class="primary" id="saveIt" autofocus>✓ Yes, save it</button>` : ''}
+      <button class="secondary" id="changeIt">✎ Change something</button>
+    </div>
+    <div class="row" style="margin-top:6px"><button class="linkish" id="readBack" style="flex:0 0 auto">🔊 Read it to me</button>
+      <button class="linkish" id="startOver" style="flex:0 0 auto">Start over</button></div>`);
+
+  sheet.querySelectorAll('[data-pick]').forEach(b => b.onclick = () => {
+    if(b.dataset.pick==='__other'){ return openForm({...d, date: ymd(new Date())}, p); }
+    showConfirm(p, {...d, date:b.dataset.pick, _resolvedConflict:true}); });
+  sheet.querySelectorAll('[data-time]').forEach(b => b.onclick = () => {
+    if(b.dataset.time==='__other') return openForm({...d, time:'09:00'}, p);
+    if(b.dataset.time==='__none') return showConfirm(p, {...d, time:null, _anyTime:true});
+    showConfirm(p, {...d, time:b.dataset.time, _timeOk:true}); });
+  sheet.querySelectorAll('[data-ampm]').forEach(b => b.onclick = () => showConfirm(p, {...d, time:b.dataset.ampm, _timeOk:true}));
+  const sv = sheet.querySelector('#saveIt'); if(sv) sv.onclick = () => commit(d);
+  sheet.querySelector('#changeIt').onclick = () => openForm(d, p);
+  sheet.querySelector('#readBack').onclick = () => speak(`${d.title}. ${d.date?fmtDate(d.date):'No day yet'}, at ${fmtTimeSpoken(d.time)}.` + (ready?' Is this right?':''));
+  sheet.querySelector('#startOver').onclick = () => openType(p && p.raw || '');
+}
+
+/* ---------- Simple form ---------- */
+function openForm(a={}, p=null){
+  const isEdit = !!a.id;
+  openSheet(`${head(isEdit ? 'Change appointment' : 'New appointment')}
+    <form id="frm" novalidate>
+      <label class="f" for="fTitle">What is it?</label>
+      <input class="f" id="fTitle" autofocus value="${esc(a.title||'')}" placeholder="e.g. Family doctor">
+      <label class="f" for="fDate">Which day?</label>
+      <input class="f" id="fDate" type="date" value="${a.date||ymd(new Date())}">
+      <label class="f" for="fTime">What time?</label>
+      <input class="f" id="fTime" type="time" value="${a.time||''}">
+      <label class="f" for="fPlace">Where? <span style="font-weight:400">(optional)</span></label>
+      <input class="f" id="fPlace" value="${esc(a.place||'')}" placeholder="e.g. Bank Street Clinic">
+      <div class="row"><button class="primary" type="submit">✓ Save</button><button class="secondary" type="button" data-close>Cancel</button></div>
+    </form>`);
+  sheet.querySelector('#frm').addEventListener('submit', e => {
+    e.preventDefault();
+    const title = sheet.querySelector('#fTitle').value.trim() || 'Appointment';
+    const date = sheet.querySelector('#fDate').value; if(!date){ sheet.querySelector('#fDate').focus(); return; }
+    commit({...a, title, date, time: sheet.querySelector('#fTime').value || null, place: sheet.querySelector('#fPlace').value.trim(),
+            cat: categorize(title + ' ' + (p?.raw||''))});
+  });
+}
+
+/* ---------- Save / delete / undo ---------- */
+let undoFn = null, toastTimer = null;
+function toast(msg, undo){
+  document.getElementById('toastMsg').textContent = msg;
+  undoFn = undo || null; document.getElementById('toastUndo').style.display = undo ? '' : 'none';
+  const t = document.getElementById('toast'); t.classList.add('show');
+  clearTimeout(toastTimer); toastTimer = setTimeout(()=>t.classList.remove('show'), 8000);
+}
+document.getElementById('toastUndo').onclick = () => { if(undoFn) undoFn(); undoFn = null; document.getElementById('toast').classList.remove('show'); };
+
+function commit(d){
+  const clean = {id: d.id || uid(), title: d.title, date: d.date, time: d.time || null, place: d.place || '', cat: d.cat || categorize(d.title)};
+  const before = JSON.stringify(state.appts);
+  const i = state.appts.findIndex(a=>a.id===clean.id);
+  if(i>=0) state.appts[i] = clean; else state.appts.push(clean);
+  save(); closeSheet();
+  const dt = fromYmd(clean.date); cursor = new Date(dt.getFullYear(), dt.getMonth(), 1);
+  renderAll();
+  const msg = `Saved: ${clean.title}, ${fmtDate(clean.date)} at ${fmtTime(clean.time)}.`;
+  toast(msg, () => { state.appts = JSON.parse(before); save(); renderAll(); say('Undone.'); });
+  say(msg);
+}
+function confirmDelete(id){
+  const a = state.appts.find(x=>x.id===id); if(!a) return;
+  openSheet(`${head('Delete this appointment?')}
+    <div class="confirm"><div class="top"><span class="ico" aria-hidden="true">${a.cat.icon}</span><div><div class="what">${esc(a.title)}</div>
+    <div class="cat">${fmtDateYear(a.date)} at ${fmtTime(a.time)}</div></div></div></div>
+    <div class="row"><button class="primary" id="yesDel" style="background:var(--danger)">Yes, delete it</button><button class="secondary" data-close autofocus>No, keep it</button></div>`);
+  sheet.querySelector('#yesDel').onclick = () => {
+    const before = JSON.stringify(state.appts);
+    state.appts = state.appts.filter(x=>x.id!==id); save(); closeSheet(); renderAll();
+    toast(`Deleted: ${a.title}.`, () => { state.appts = JSON.parse(before); save(); renderAll(); });
+  };
+}
+
+/* ---------- Speech output ---------- */
+function speak(text){ try{ const u = new SpeechSynthesisUtterance(text); u.rate = 0.9; u.lang = 'en-CA'; speechSynthesis.cancel(); speechSynthesis.speak(u); }catch(e){} }
+function stopSpeaking(){ try{ speechSynthesis.cancel(); }catch(e){} }
+function say(text){ const el = document.getElementById('srLive'); el.textContent = ''; setTimeout(()=> el.textContent = text, 50); }
+
+/* =========================================================
+   Wire up
+   ========================================================= */
+document.getElementById('speakBtn').onclick = openSpeak;
+document.getElementById('typeBtn').onclick = () => openType();
+document.getElementById('viewMonth').onclick = () => { state.view='month'; save(); renderAll(); };
+document.getElementById('viewList').onclick = () => { state.view='list'; save(); renderAll(); };
+document.getElementById('prevM').onclick = () => { cursor = new Date(cursor.getFullYear(), cursor.getMonth()-1, 1); renderMonth(); };
+document.getElementById('nextM').onclick = () => { cursor = new Date(cursor.getFullYear(), cursor.getMonth()+1, 1); renderMonth(); };
+document.getElementById('todayBtn').onclick = () => { cursor = new Date(); cursor.setDate(1); renderMonth(); openDay(ymd(new Date())); };
+document.querySelectorAll('.size-btns button').forEach(b => b.onclick = () => { state.scale = +b.dataset.scale; save(); renderAll(); });
+
+load(); seedIfNew(); tickClock(); renderAll();
+setInterval(()=>{ tickClock(); renderNext(); }, 30000);
+</script>
+</body>
+</html>
